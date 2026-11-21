@@ -11,7 +11,10 @@
   body { display: flex; flex-direction: column; align-items: center; padding: 1rem; gap: 1rem; text-align: center; min-height: 100%; }
   h1 { margin: 0; font-size: 1.4rem; }
   #stage { width: 100%; max-width: 44rem; display: flex; flex-direction: column; gap: 1rem; align-items: center; }
-  #main { width: 100%; height: auto; border-radius: 14px; background: #000; display: block; }
+  #main { width: auto; height: auto; max-width: 100%; max-height: 68vh; border-radius: 14px; background: #000; display: block; }
+  .formats { display: flex; gap: .5rem; flex-wrap: wrap; justify-content: center; }
+  .formats button { background: #2b3550; padding: .6em 1em; font-size: .95rem; }
+  .formats button.active { background: var(--accent); }
   .filters { display: flex; gap: .6rem; overflow-x: auto; width: 100%; padding: .2rem .1rem .6rem; scroll-snap-type: x proximity; }
   .filters button { flex: 0 0 auto; background: transparent; padding: 0; border-radius: 12px; border: 3px solid transparent; scroll-snap-align: start; color: var(--muted); font-size: .8rem; font-weight: 500; }
   .filters button canvas { display: block; width: 5.2rem; height: 5.2rem; border-radius: 9px; }
@@ -32,18 +35,36 @@
 
   <div id="stage" class="hidden">
     <canvas id="main"></canvas>
+    <div id="formats" class="formats"></div>
     <div id="filters" class="filters"></div>
     <div class="actions">
       <button id="saveBtn">⬇️ Herunterladen</button>
       <button id="shareBtn" class="secondary hidden">📤 Teilen / Sichern</button>
     </div>
-    <p class="hint">Das Foto wird nur für kurze Zeit gespeichert und danach automatisch gelöscht.</p>
+    <p class="hint">Hochkant ist die Mitte des Querbilds. Das Foto wird nur für kurze Zeit gespeichert und danach automatisch gelöscht.</p>
   </div>
 
 <script>
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id);
+
+  // ---------- Formate ----------
+  // ratio = Breite / Höhe des Ausschnitts (aus der Mitte des Fotos); null = Original
+  const FORMATS = [
+    { id: "quer", label: "Quer", ratio: null },
+    { id: "hochkant-3x4", label: "Hochkant 3:4", ratio: 3 / 4 },
+    { id: "hochkant-9x16", label: "Hochkant 9:16", ratio: 9 / 16 },
+  ];
+
+  // Ausschnitt aus der Mitte des Originals berechnen
+  function cropRect(w, h, ratio) {
+    if (!ratio) return { x: 0, y: 0, w: w, h: h };
+    let cw = w, ch = h;
+    if (w / h > ratio) cw = Math.round(h * ratio); // zu breit: Seiten abschneiden
+    else ch = Math.round(w / ratio);               // zu hoch: oben/unten abschneiden
+    return { x: Math.round((w - cw) / 2), y: Math.round((h - ch) / 2), w: cw, h: ch };
+  }
 
   // ---------- Filter ----------
   // gray/sepia: 0..1 Anteil, sat/contrast/bright: Faktoren, tint: Farbfaktoren, vignette: 0..1
@@ -117,18 +138,31 @@
     return;
   }
 
-  let current = 0;
+  let curFilter = 0;
+  let curFormat = 0;
   const orig = document.createElement("canvas");
   const main = $("main");
 
-  function render(idx) {
-    current = idx;
+  function render() {
+    const c = cropRect(orig.width, orig.height, FORMATS[curFormat].ratio);
+    main.width = c.w;
+    main.height = c.h;
     const ctx = main.getContext("2d");
-    ctx.drawImage(orig, 0, 0);
-    if (FILTERS[idx].name !== "Original") {
-      ctx.putImageData(applyFilter(ctx.getImageData(0, 0, main.width, main.height), FILTERS[idx]), 0, 0);
+    ctx.drawImage(orig, c.x, c.y, c.w, c.h, 0, 0, c.w, c.h);
+    if (FILTERS[curFilter].name !== "Original") {
+      ctx.putImageData(applyFilter(ctx.getImageData(0, 0, c.w, c.h), FILTERS[curFilter]), 0, 0);
     }
-    [...$("filters").children].forEach((b, i) => b.classList.toggle("active", i === idx));
+    [...$("filters").children].forEach((b, i) => b.classList.toggle("active", i === curFilter));
+    [...$("formats").children].forEach((b, i) => b.classList.toggle("active", i === curFormat));
+  }
+
+  function buildFormatButtons() {
+    FORMATS.forEach((f, i) => {
+      const b = document.createElement("button");
+      b.textContent = f.label;
+      b.addEventListener("click", () => { curFormat = i; render(); });
+      $("formats").appendChild(b);
+    });
   }
 
   function buildFilterStrip() {
@@ -148,7 +182,7 @@
       const label = document.createElement("span");
       label.textContent = f.name;
       btn.append(c, label);
-      btn.addEventListener("click", () => render(i));
+      btn.addEventListener("click", () => { curFilter = i; render(); });
       $("filters").appendChild(btn);
     });
   }
@@ -169,12 +203,13 @@
     const url = URL.createObjectURL(blob);
     const img = new Image();
     img.onload = () => {
-      orig.width = main.width = img.naturalWidth;
-      orig.height = main.height = img.naturalHeight;
+      orig.width = img.naturalWidth;
+      orig.height = img.naturalHeight;
       orig.getContext("2d").drawImage(img, 0, 0);
       URL.revokeObjectURL(url);
+      buildFormatButtons();
       buildFilterStrip();
-      render(0);
+      render();
       $("loading").classList.add("hidden");
       $("stage").classList.remove("hidden");
     };
@@ -186,8 +221,12 @@
   function currentBlob() {
     return new Promise((resolve) => main.toBlob(resolve, "image/jpeg", 0.92));
   }
+  function slug(s) {
+    return s.toLowerCase().replace(/ß/g, "ss").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  }
   function fileName() {
-    return "foto-" + FILTERS[current].name.toLowerCase().replace(/[^a-z0-9]+/g, "-") + ".jpg";
+    const filter = curFilter === 0 ? "" : "-" + slug(FILTERS[curFilter].name);
+    return "foto-" + FORMATS[curFormat].id + filter + ".jpg";
   }
 
   $("saveBtn").addEventListener("click", async () => {

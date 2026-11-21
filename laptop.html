@@ -20,11 +20,24 @@
   .cam video, .cam img { width: 100%; height: 100%; display: block; }
   .cam video { object-fit: cover; }
   .cam img { object-fit: contain; background: #000; }
-  .badge { position: absolute; top: .8rem; left: .8rem; }
   .row { display: flex; align-items: center; justify-content: space-between; gap: .8rem; margin: .6rem 0; }
   .row label { color: var(--muted); font-size: .9rem; }
   select { font: inherit; background: #2b3550; color: var(--text); border: 0; border-radius: 10px; padding: .5em .8em; }
   .full { width: 100%; }
+  kbd { background: #2b3550; border-radius: 6px; padding: .1em .45em; font: inherit; font-size: .85em; }
+
+  /* ---------- Stand-Ansicht: nur das Livebild des Handys, Vollbild ---------- */
+  #hud { display: none; }
+  body.kiosk { display: block; min-height: 0; overflow: hidden; }
+  body.kiosk header, body.kiosk .side, body.kiosk .shoot, body.kiosk #httpsHint { display: none !important; }
+  body.kiosk #camView { display: block; padding: 0; }
+  body.kiosk .cam { position: fixed; inset: 0; z-index: 10; aspect-ratio: auto; border-radius: 0; background: #000; }
+  body.kiosk { cursor: none; }
+  body.kiosk.hud { cursor: default; }
+  body.kiosk #camError { position: fixed; top: 1rem; left: 50%; transform: translateX(-50%); z-index: 30; }
+  body.kiosk.hud #hud { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; flex-wrap: wrap; justify-content: center; align-items: center; gap: .8rem; padding: 3rem 1rem 1.2rem; background: linear-gradient(transparent, rgba(0, 0, 0, .75)); }
+  #hud button { font-size: 1.1rem; }
+  #hud .keys { width: 100%; text-align: center; color: #cfd6e6; font-size: .9rem; }
 
   /* Ergebnis */
   #result { display: grid; grid-template-columns: 1fr 22rem; gap: 1.5rem; align-items: center; }
@@ -60,20 +73,21 @@
     <div class="cam">
       <video id="video" class="mirror" autoplay playsinline muted></video>
       <img id="phoneStream" class="hidden" alt="Livebild vom Handy">
-      <span id="badge" class="status badge hidden">📱 Handy-Kamera</span>
       <div id="count" class="count"></div>
       <div id="flash" class="flash"></div>
     </div>
     <div id="camError" class="error hidden"></div>
     <div class="shoot">
-      <button id="shootBtn">📸 Foto machen</button>
+      <button id="shootBtn">📸 Foto machen (Enter)</button>
       <button id="flipBtn" class="secondary small hidden">🔄 Handy-Kamera wechseln</button>
+      <button id="kioskBtn" class="secondary small hidden">🖥️ Nur Kamerabild zeigen</button>
     </div>
   </section>
 
   <aside class="side">
     <div class="panel">
       <h2>Steuerung</h2>
+      <p>Auslösen mit <kbd>Enter</kbd>. Vollbild mit <kbd>F</kbd>.</p>
       <div class="row">
         <label for="cdSel">Countdown</label>
         <select id="cdSel">
@@ -83,18 +97,36 @@
           <option value="10">10 Sekunden</option>
         </select>
       </div>
+      <div class="row">
+        <label for="closeSel">Foto + QR schließen</label>
+        <select id="closeSel">
+          <option value="0">mit Enter</option>
+          <option value="30">nach 30 s</option>
+          <option value="60">nach 60 s</option>
+          <option value="120">nach 2 Min.</option>
+        </select>
+      </div>
       <button id="clearBtn" class="secondary full">🗑️ Alle Fotos löschen (<span id="photoCount">0</span>)</button>
       <p>Abhol-Adresse: <span id="tunnelLink">noch keine</span></p>
     </div>
-    <div class="panel">
+    <div id="pairPanel" class="panel">
       <h2>Handy als externe Kamera</h2>
-      <p>Handy ins selbe WLAN und diesen QR-Code scannen. Alles weitere (Livebild, Auslösen, Kamera wechseln) steuerst du hier am Laptop.</p>
+      <p>Handy quer halten, ins selbe WLAN und diesen QR-Code scannen. Danach verschwindet er und nur noch das Livebild des Handys ist zu sehen.</p>
       <div id="pairQr" class="qr hidden"></div>
       <p id="pairLink"></p>
       <p id="certHint" class="hidden">Beim ersten Mal zeigt das Handy eine Warnung zum Zertifikat (der Laptop stellt es selbst aus). Auf „Erweitert“ → „Trotzdem fortfahren“ tippen.</p>
     </div>
   </aside>
 </main>
+
+<!-- Bedienleiste in der Stand-Ansicht: erscheint nur bei Mausbewegung -->
+<div id="hud">
+  <button id="hudShoot">📸 Foto machen</button>
+  <button id="hudFlip" class="secondary">🔄 Kamera wechseln</button>
+  <button id="hudFs" class="secondary">⛶ Vollbild</button>
+  <button id="hudSettings" class="secondary">⚙️ Einstellungen</button>
+  <div class="keys"><kbd>Enter</kbd> Foto · <kbd>F</kbd> Vollbild</div>
+</div>
 
 <main id="result" class="hidden">
   <section>
@@ -106,11 +138,12 @@
       <h2>📱 Scannen &amp; Foto holen</h2>
       <div id="resultQr" class="qr"></div>
       <p id="expiryNote" style="color:var(--muted)"></p>
+      <p id="autoNote" style="color:var(--muted)"></p>
     </div>
     <div id="uploadError" class="error hidden"></div>
     <p>
       <button id="retryBtn" class="secondary hidden">Nochmal versuchen</button>
-      <button id="newBtn">Nächstes Foto</button>
+      <button id="newBtn">Nächstes Foto (Enter)</button>
     </p>
   </section>
 </main>
@@ -128,23 +161,38 @@
 
   let busy = false;
   let phoneOn = false;
+  let kioskOff = false;   // true = Einstellungen anzeigen statt nur Kamerabild
   let seqSeen = null;
   let lastGetUp = null;
   let lastLanUrl = null;
   let awaitingPhoto = 0;
+  let autoTimer = null;
+
+  const camVisible = () => !$("camView").classList.contains("hidden");
+  const resultVisible = () => !$("result").classList.contains("hidden");
 
   function showError(msg) {
     $("camError").textContent = msg;
     $("camError").classList.remove("hidden");
   }
 
-  // ---------- Countdown-Einstellung (bleibt im Browser gespeichert) ----------
-  let saved = null;
-  try { saved = localStorage.getItem("wcu-countdown"); } catch (e) {}
-  $("cdSel").value = saved !== null && [...$("cdSel").options].some((o) => o.value === saved) ? saved : String(CFG.COUNTDOWN);
-  $("cdSel").addEventListener("change", () => {
-    try { localStorage.setItem("wcu-countdown", $("cdSel").value); } catch (e) {}
-  });
+  // Stand-Ansicht: nur das Livebild des Handys, solange ein Handy verbunden ist
+  function updateKiosk() {
+    document.body.classList.toggle("kiosk", phoneOn && !kioskOff && camVisible());
+    $("kioskBtn").classList.toggle("hidden", !(phoneOn && kioskOff));
+    $("pairPanel").classList.toggle("hidden", phoneOn); // QR nur, solange kein Handy verbunden ist
+  }
+
+  // ---------- gespeicherte Einstellungen ----------
+  function loadSetting(id, key, fallback) {
+    const sel = $(id);
+    let v = null;
+    try { v = localStorage.getItem(key); } catch (e) {}
+    sel.value = v !== null && [...sel.options].some((o) => o.value === v) ? v : String(fallback);
+    sel.addEventListener("change", () => { try { localStorage.setItem(key, sel.value); } catch (e) {} });
+  }
+  loadSetting("cdSel", "wcu-countdown", CFG.COUNTDOWN);
+  loadSetting("closeSel", "wcu-close", 0);
 
   // ---------- Laptop-Kamera ----------
   async function initCamera() {
@@ -157,8 +205,8 @@
   }
 
   // ---------- Foto auslösen (Laptop-Kamera oder Handy, je nachdem was aktiv ist) ----------
-  $("shootBtn").addEventListener("click", async () => {
-    if (busy) return;
+  async function shoot() {
+    if (busy || !camVisible()) return;
     busy = true;
     $("shootBtn").disabled = true;
     $("camError").classList.add("hidden");
@@ -184,28 +232,72 @@
       busy = false;
       $("shootBtn").disabled = false;
     }
-  });
+  }
 
-  $("flipBtn").addEventListener("click", async () => {
+  async function flip() {
     try { await WCU.sendCmd("flip"); } catch (e) { showError(e.message); }
-  });
+  }
 
-  $("clearBtn").addEventListener("click", async () => {
+  async function clearAll() {
     if (!confirm("Wirklich alle gespeicherten Fotos löschen? Bereits gescannte QR-Codes funktionieren dann nicht mehr.")) return;
     try {
       const n = await WCU.clearPhotos();
       $("photoCount").textContent = "0";
       alert(n + " Foto(s) gelöscht.");
     } catch (e) { showError(e.message); }
+  }
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+  }
+
+  $("shootBtn").addEventListener("click", shoot);
+  $("hudShoot").addEventListener("click", shoot);
+  $("flipBtn").addEventListener("click", flip);
+  $("hudFlip").addEventListener("click", flip);
+  $("clearBtn").addEventListener("click", clearAll);
+  $("hudFs").addEventListener("click", toggleFullscreen);
+  $("hudSettings").addEventListener("click", () => { kioskOff = true; updateKiosk(); });
+  $("kioskBtn").addEventListener("click", () => { kioskOff = false; updateKiosk(); });
+
+  // ---------- Tastatur: Enter löst aus (bzw. schließt die Foto-Anzeige), F = Vollbild ----------
+  let lastEnter = 0;
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault(); // verhindert, dass ein fokussierter Knopf zusätzlich auslöst
+      if (e.repeat || Date.now() - lastEnter < 600) return;
+      lastEnter = Date.now();
+      if (camVisible()) shoot(); else closeResult();
+    } else if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      toggleFullscreen();
+    }
+  }, true);
+  // Knöpfe nach dem Klick nicht fokussiert lassen
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest && e.target.closest("button");
+    if (b) b.blur();
   });
+
+  // Bedienleiste in der Stand-Ansicht nur bei Mausbewegung zeigen
+  let hudTimer = null;
+  function wakeHud() {
+    document.body.classList.add("hud");
+    clearTimeout(hudTimer);
+    hudTimer = setTimeout(() => document.body.classList.remove("hud"), 3000);
+  }
+  document.addEventListener("mousemove", wakeHud);
+  document.addEventListener("touchstart", wakeHud, { passive: true });
 
   // ---------- Ergebnis anzeigen ----------
   // previewSrc: Bildadresse für die Vorschau, getUp: liefert { token, publicUrl, ttl }
   async function present(previewSrc, getUp) {
     lastGetUp = getUp;
+    stopAuto();
     $("photo").src = previewSrc;
     $("camView").classList.add("hidden");
     $("result").classList.remove("hidden");
+    updateKiosk();
     await run();
   }
 
@@ -221,6 +313,7 @@
       $("expiryNote").textContent = "Das Foto ist " + (h >= 1 ? Math.round(h) + " Std." : Math.round(h * 60) + " Min.") + " abrufbar.";
       $("uploading").classList.add("hidden");
       $("uploaded").classList.remove("hidden");
+      startAuto();
     } catch (e) {
       $("uploading").classList.add("hidden");
       $("uploadError").textContent = e.message;
@@ -229,16 +322,38 @@
     }
   }
 
-  $("retryBtn").addEventListener("click", run);
-  $("newBtn").addEventListener("click", () => {
+  // Foto-Anzeige schließt sich nach der gewählten Zeit von selbst (0 = erst mit Enter)
+  function stopAuto() {
+    clearInterval(autoTimer);
+    autoTimer = null;
+    $("autoNote").textContent = "";
+  }
+  function startAuto() {
+    stopAuto();
+    let left = parseInt($("closeSel").value, 10) || 0;
+    if (!left) return;
+    const tick = () => {
+      $("autoNote").textContent = "Schließt automatisch in " + left + " s";
+      if (left-- <= 0) closeResult();
+    };
+    tick();
+    autoTimer = setInterval(tick, 1000);
+  }
+
+  function closeResult() {
+    if (!resultVisible()) return;
+    stopAuto();
     $("result").classList.add("hidden");
     $("camView").classList.remove("hidden");
-  });
+    updateKiosk();
+  }
+
+  $("retryBtn").addEventListener("click", run);
+  $("newBtn").addEventListener("click", closeResult);
 
   // Foto, das vom Handy geschickt wurde (liegt schon auf dem Server)
   function presentFromPhone(token) {
     awaitingPhoto = 0;
-    WCU.flash($("flash"));
     present(WCU.server() + "/img/" + encodeURIComponent(token), async () => {
       const i = await WCU.serverInfo();
       if (!i.public_url) throw new Error("Noch keine Abhol-Adresse (der Tunnel startet gerade). Gleich nochmal versuchen.");
@@ -260,10 +375,10 @@
     phoneOn = on;
     const el = $("phoneStatus");
     if (on) {
+      kioskOff = false; // frisch verbunden: gleich Stand-Ansicht
       WCU.stopCamera();
       $("video").classList.add("hidden");
       $("phoneStream").classList.remove("hidden");
-      $("badge").classList.remove("hidden");
       $("flipBtn").classList.remove("hidden");
       connectStream();
       el.textContent = "Handy verbunden ✓";
@@ -271,13 +386,13 @@
     } else {
       $("phoneStream").removeAttribute("src");
       $("phoneStream").classList.add("hidden");
-      $("badge").classList.add("hidden");
       $("flipBtn").classList.add("hidden");
       $("video").classList.remove("hidden");
       el.textContent = "Handy: nicht verbunden";
       el.className = "status";
       initCamera();
     }
+    updateKiosk();
   }
 
   // ---------- Server abfragen ----------
