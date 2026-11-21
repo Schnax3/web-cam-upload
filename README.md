@@ -2,12 +2,15 @@
 
 Foto-Aktion für den Aktionsstand: Foto aufnehmen → QR-Code erscheint → Besucher scannen ihn mit dem eigenen Handy und landen auf einer Seite mit **Vorschau, Filtern und Download-Button**.
 
-**Alles läuft lokal auf deinem Laptop.** Nur das Abholen der Fotos geht über das Internet (GitHub-Pages-Seite + Tunnel). Die Fotos liegen ausschließlich auf dem Laptop und sind nur mit dem Token im QR-Code abrufbar.
+- **Alles wird am Laptop gesteuert.** Das Handy ist nur eine externe Kamera (Livebild, Auslösen und Kamerawechsel kommen vom Laptop).
+- **Alles läuft lokal.** Nur das Abholen der Fotos geht über das Internet (GitHub-Pages-Seite + Cloudflare-Tunnel).
+- **Der Tunnel richtet sich selbst ein.** Ein Befehl startet alles, cloudflared wird bei Bedarf automatisch heruntergeladen.
+- Die Fotos liegen ausschließlich auf dem Laptop und sind nur mit dem Token im QR-Code abrufbar.
 
 ## Inhalt
 
 1. [Überblick](#überblick)
-2. [Einmalige Einrichtung](#einmalige-einrichtung)
+2. [Einrichtung](#einrichtung)
 3. [Am Stand](#am-stand)
 4. [Einstellungen](#einstellungen)
 5. [Sicherheit und Datenschutz](#sicherheit-und-datenschutz)
@@ -21,80 +24,69 @@ Foto-Aktion für den Aktionsstand: Foto aufnehmen → QR-Code erscheint → Besu
 ## Überblick
 
 ```
-        ┌──────────────── lokal, auf dem Laptop und im WLAN ────────────────┐
-        │                                                                   │
-        │  Laptop-Browser: http://localhost:8765/   (Laptop-Kamera)         │
-        │  Handy im WLAN:  http://<Laptop-IP>:8765/handy.html#<Schlüssel>   │
-        │            └──────────► foto_server.py (Python) ◄───┘             │
-        │                          speichert photos/<Token>.jpg             │
-        └───────────────────────────────┬───────────────────────────────────┘
-                                        │ Cloudflare-Tunnel (https), nur GET /img/<Token>
-                                        ▼
- Besucher scannt QR ─► foto.html#s=<Tunnel>&t=<Token>  (GitHub Pages) ─► Vorschau, Filter, Download
+   Laptop-Browser  http://localhost:8765/   ◄── Steuerung: Auslöser, Countdown, Kamerawechsel, Löschen
+        │                                        zeigt Livebild (Laptop-Kamera ODER Handy)
+        ▼
+   foto_server.py  (Python auf dem Laptop)  ── speichert photos/<Token>.jpg
+        ▲                          │
+        │  https, nur im WLAN      │  Cloudflare-Tunnel (wird automatisch gestartet), nur GET /img/<Token>
+   Handy = externe Kamera          ▼
+   sendet Livebild,        Besucher scannt QR ─► foto.html#s=<Tunnel>&t=<Token>  (GitHub Pages)
+   löst auf Befehl aus                              └─► Vorschau, Filter, Download
 ```
 
-**Handy hat Vorrang:** Solange kein Handy verbunden ist, benutzt die Laptop-Seite die Laptop-Kamera. Sobald du ein Handy koppelst (auch nachträglich), pausiert die Laptop-Kamera, die Laptop-Seite zeigt „Handy-Kamera aktiv“ und neue Fotos kommen vom Handy. Schließt du die Handy-Seite (oder das Handy verliert das WLAN), geht die Laptop-Kamera nach ca. 8 Sekunden von selbst wieder an.
+**Handy hat Vorrang:** Solange kein Handy verbunden ist, benutzt die Laptop-Seite die Laptop-Kamera. Sobald du ein Handy koppelst (auch nachträglich), pausiert die Laptop-Kamera und im Kamerabild der Laptop-Seite erscheint das Livebild des Handys. „Foto machen“ löst dann am Handy aus. Schließt du die Handy-Seite, schaltet die Laptop-Seite nach ca. 4 Sekunden von selbst wieder auf die Laptop-Kamera.
 
 | Datei | Aufgabe |
 |---|---|
-| `foto_server.py` | Server auf dem Laptop. Liefert Laptop- und Handy-Seite aus, speichert Fotos, gibt sie nur per Token heraus, löscht sie nach Ablauf, startet den Tunnel. Nur Python-Standardbibliothek, keine Pakete nötig. |
-| `laptop.html` | Seite für den Laptop: Laptop-Kamera mit Countdown, Handy-Kopplung, QR-Code zum Abholen. |
-| `handy.html` | Seite für das Handy: Foto mit der Kamera-App aufnehmen, wird automatisch an den Laptop geschickt. |
+| `foto_server.py` | Der Server. Liefert die Seiten aus, nimmt Livebild und Fotos entgegen, gibt Fotos nur per Token heraus, löscht sie nach Ablauf, erzeugt das Zertifikat für das Handy, lädt cloudflared herunter und hält den Tunnel am Laufen. |
+| `laptop.html` | Steuerzentrale auf dem Laptop. |
+| `handy.html` | Externe Kamera auf dem Handy. Zeigt nur das Kamerabild, keine Bedienelemente. |
 | `foto.html` | Seite für Besucher nach dem Scannen (läuft auf GitHub Pages): Vorschau, 9 Filter, Herunterladen, Teilen. |
+| `start.bat` / `start.sh` | Doppelklick-Start für Windows bzw. Linux/macOS. |
 | `config.js` | Einstellungen (Seiten-Adresse, Countdown, Foto-Größe, Titel). |
-| `common.js`, `style.css` | Gemeinsamer Code und Aussehen. |
-| `lib/qrcode.js` | QR-Erzeugung, lokal eingebunden, kein CDN nötig. |
-| `index.html` | Startseite mit Links (für GitHub Pages). |
-
-Es werden **keine externen Dienste** für Kamera, Kopplung oder Speicherung benutzt. Nur `foto.html` kommt von GitHub Pages und das Foto selbst läuft durch den Tunnel.
+| `common.js`, `style.css`, `lib/qrcode.js` | Gemeinsamer Code, Aussehen, QR-Erzeugung (alles lokal, kein CDN). |
+| `index.html` | Startseite für GitHub Pages. |
 
 ---
 
-## Einmalige Einrichtung
+## Einrichtung
 
-### 1. GitHub Pages einschalten
+Nur zwei Dinge sind nötig. Alles andere macht der Server beim ersten Start selbst.
 
-Repo auf GitHub → **Settings → Pages** → *Build and deployment*: Source **Deploy from a branch**, Branch **main**, Ordner **/ (root)** → Save.
+### 1. GitHub Pages einschalten (einmalig)
 
-Nach ein bis zwei Minuten ist die Seite erreichbar unter:
+Repo auf GitHub → **Settings → Pages** → Source **Deploy from a branch**, Branch **main**, Ordner **/ (root)** → Save. Nach ein bis zwei Minuten ist die Seite erreichbar unter:
 
 ```
 https://schnax3.github.io/web-cam-upload/
 ```
 
-Sie wird nur für `foto.html` gebraucht (die Seite, die der QR-Code öffnet). Wenn dein Repo oder dein Benutzername anders heißt, die Adresse in `config.js` bei `PAGES_URL` anpassen (mit `/` am Ende) und den Server mit `--origin` starten (siehe unten).
+Sie wird nur für `foto.html` gebraucht (die Seite, die der QR-Code zum Abholen öffnet). Heißt dein Repo oder Benutzername anders, `PAGES_URL` in `config.js` anpassen (mit `/` am Ende) und den Server mit `--origin` starten.
 
-### 2. Python
-
-Python 3.9 oder neuer. Prüfen:
+### 2. Python 3.9 oder neuer
 
 ```
 python --version
 ```
 
-(Unter Linux/macOS evtl. `python3`.) Es müssen keine Pakete installiert werden.
+(Unter Linux/macOS `python3`.) Windows: <https://www.python.org/downloads/>, beim Installieren „Add python.exe to PATH“ anhaken.
 
-### 3. cloudflared (der Tunnel zum Abholen)
+### Was beim ersten Start automatisch passiert
 
-Die Handys der Besucher müssen ihr Foto aus dem Internet vom Laptop holen können. Dafür nutzt das Skript einen kostenlosen Cloudflare-„Quick Tunnel“. Es ist **kein Account** nötig.
-
-| System | Installation |
+| Schritt | Was der Server tut |
 |---|---|
-| Windows | `winget install Cloudflare.cloudflared` |
-| macOS | `brew install cloudflared` |
-| Linux | Paket von <https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/> |
+| **cloudflared** | Findet er das Programm nicht (weder im PATH noch in `bin/`), lädt er es von der offiziellen GitHub-Release-Seite von Cloudflare herunter (ca. 40 MB, passend zu Windows/macOS/Linux und deiner Prozessorart) und legt es in `bin/` ab. |
+| **Tunnel** | Startet einen kostenlosen Cloudflare-Quick-Tunnel (kein Account nötig) und wartet, bis die Adresse bereit ist. Bricht der Tunnel ab, wird er automatisch neu gestartet. Ohne Internet wird die Wartezeit schrittweise länger (bis 60 s) und der Grund angezeigt. |
+| **Zertifikat** | Browser erlauben die Handy-Kamera nur über https. Der Server installiert dafür einmalig das Python-Paket `cryptography` und stellt ein eigenes Zertifikat für die WLAN-Adresse des Laptops aus (`certs/`, gültig 1 Jahr, wird bei neuer WLAN-Adresse neu erzeugt). |
+| **Schlüssel** | Erzeugt einen zufälligen Kopplungsschlüssel (`.pairkey`). |
+| **Browser** | Öffnet die Laptop-Seite. |
 
-Danach **neues Terminal öffnen** und prüfen:
+Mit `--no-install` wird nichts automatisch heruntergeladen oder installiert.
 
-```
-cloudflared --version
-```
+### Windows-Firewall (nur beim ersten Start)
 
-Statt Cloudflare geht auch ein eigener Tunnel (Tailscale Funnel, ngrok, eigener Cloudflare-Tunnel mit fester Adresse): Server mit `--public-url https://deine-adresse` starten.
-
-### 4. Windows-Firewall (nur beim ersten Start)
-
-Windows fragt beim ersten Start, ob Python im Netzwerk kommunizieren darf. **Zugriff in privaten Netzwerken erlauben.** Ohne das kann das Handy den Laptop im WLAN nicht erreichen.
+Windows fragt, ob Python im Netzwerk kommunizieren darf. **Zugriff in privaten Netzwerken erlauben**, sonst erreicht das Handy den Laptop nicht.
 
 ---
 
@@ -102,54 +94,62 @@ Windows fragt beim ersten Start, ob Python im Netzwerk kommunizieren darf. **Zug
 
 ### Starten
 
-Im Projektordner:
+Windows: Doppelklick auf **`start.bat`**. Linux/macOS: **`./start.sh`**. Oder im Terminal:
 
 ```
 python foto_server.py
 ```
 
-Das Skript startet den Server, startet den Tunnel und gibt die Adressen aus, z. B.:
+Ausgabe, z. B.:
 
 ```
 Foto-Server läuft (Fotos werden nach 24 h gelöscht)
 Starte Cloudflare-Tunnel …
 
 Laptop-Seite:  http://localhost:8765/
-Handy-Seite:   http://192.168.1.23:8765/handy.html#k3Jd8sLq0xw   (Handy im selben WLAN; auf der Laptop-Seite steht ein QR dafür)
+Handy-Seite:   https://192.168.1.23:8766/handy.html#k3Jd8sLq0xw   (QR dafür steht auf der Laptop-Seite)
 Abhol-Adresse (nur per Token): https://xyz-abc.trycloudflare.com
 ```
 
-Das Terminal-Fenster muss während der ganzen Aktion offen bleiben.
+Der Browser öffnet sich von selbst auf der Laptop-Seite. Das Terminal-Fenster muss während der Aktion offen bleiben.
 
-### Laptop-Seite öffnen
+### Die Laptop-Seite
 
-Im Browser des Laptops **`http://localhost:8765/`** öffnen und die Kamera erlauben. (Nicht die GitHub-Pages-Adresse: Die Laptop-Seite läuft lokal.) Oben rechts zeigt die Seite zwei Anzeigen:
+Oben rechts zeigt die Seite den Zustand:
 
 | Anzeige | Bedeutung |
 |---|---|
-| **Server ✓** (grün) | Foto-Server und Tunnel laufen. Alles gut. |
-| **Server nicht erreichbar** (rot) | `foto_server.py` läuft nicht. |
-| **Server ohne Tunnel** (rot) | Server läuft, aber es gibt keine Abhol-Adresse (cloudflared fehlt oder `--no-tunnel`). |
-| **Handy verbunden ✓** (grün) | Ein Handy ist gekoppelt. Die Handy-Kamera hat Vorrang. |
+| **Server ✓ Tunnel ✓** (grün) | Alles bereit, Fotos können abgeholt werden. |
+| **Tunnel startet …** (rot) | Server läuft, der Tunnel ist noch nicht bereit (dauert beim Start einige Sekunden). |
+| **Server nicht erreichbar** (rot) | `foto_server.py` läuft nicht mehr. |
+| **Handy verbunden ✓** | Ein Handy ist gekoppelt, die Handy-Kamera hat Vorrang. |
 
-### Foto mit der Laptop-Kamera
+Alles Wichtige wird hier bedient:
 
-1. **📸 Foto machen** klicken.
-2. Countdown 3-2-1, Blitz, das Foto wird gespeichert.
-3. Es erscheint ein großer QR-Code. Der Besucher scannt ihn mit der Handy-Kamera.
-4. **Nächstes Foto** klicken für die nächste Person.
+- **📸 Foto machen:** Countdown, dann wird mit der aktiven Kamera ausgelöst (Laptop oder Handy).
+- **🔄 Handy-Kamera wechseln:** Hinten/vorne (nur sichtbar, wenn ein Handy verbunden ist).
+- **Countdown:** aus, 3, 5 oder 10 Sekunden (wird im Browser gemerkt).
+- **🗑️ Alle Fotos löschen:** löscht sofort alles auf dem Laptop (mit Rückfrage).
+- **Abhol-Adresse:** zeigt die aktuelle Tunnel-Adresse.
+- **QR-Code „Handy als externe Kamera“:** zum Koppeln des Handys.
 
-### Handy hinzufügen (jederzeit)
+### Foto aufnehmen und abholen
+
+1. **📸 Foto machen** klicken, Countdown läuft über dem Kamerabild.
+2. Das Foto erscheint groß mit einem **QR-Code**. Der Besucher scannt ihn mit der Handy-Kamera.
+3. **Nächstes Foto** klicken.
+
+### Handy als externe Kamera hinzufügen (jederzeit)
 
 1. Handy ins **selbe WLAN** wie der Laptop.
-2. Rechts auf der Laptop-Seite im Kasten **„Handy koppeln“** den QR-Code mit dem Handy scannen.
-3. Auf dem Handy steht oben **„Mit Laptop verbunden ✓“**. Gleichzeitig wechselt die Laptop-Seite auf **„Handy-Kamera aktiv“**, die Laptop-Kamera wird ausgeschaltet.
-4. Am Handy **📷 Foto aufnehmen** (hintere Kamera) oder **🤳 Selfie** (vordere Kamera) tippen. Es öffnet sich die Kamera-App des Handys. Nach dem Foto wird es automatisch gesendet.
-5. Das Foto erscheint am Laptop samt QR-Code zum Abholen. Das Handy zeigt „Foto angekommen ✓“ und ist sofort bereit für das nächste.
+2. Den QR-Code im Kasten „Handy als externe Kamera“ mit dem Handy scannen.
+3. **Beim ersten Mal** zeigt das Handy eine Zertifikatswarnung („Verbindung nicht privat“ / „Nicht sicher“), weil der Laptop sein Zertifikat selbst ausstellt: Android/Chrome „Erweitert → Weiter zu … (unsicher)“, iPhone/Safari „Details einblenden → Diese Website besuchen“. Das ist nur für das eigene Handy nötig und wird später nicht mehr gefragt. Danach noch die Kamera erlauben.
+4. Das Handy zeigt das Kamerabild vollflächig und oben „Mit Laptop verbunden ✓“. Der Bildschirm bleibt an. Auf der Laptop-Seite erscheint das Livebild des Handys, die Laptop-Kamera pausiert.
+5. Ab jetzt alles am Laptop: Foto machen, Kamera wechseln. Das Foto kommt in voller Auflösung vom Handy und erscheint mit QR-Code am Laptop.
 
-Zurück zur Laptop-Kamera: Handy-Seite schließen. Nach ca. 8 Sekunden schaltet die Laptop-Seite wieder auf die Laptop-Kamera.
+Zurück zur Laptop-Kamera: Handy-Seite schließen (oder Handy sperren). Nach ca. 4 Sekunden schaltet die Laptop-Seite um.
 
-Die Kopplung bleibt gültig, auch nach Neustart des Servers (der Schlüssel steht in der Datei `.pairkey`), solange sich die WLAN-Adresse des Laptops nicht ändert. Das Handy kann denselben QR/Link also weiterverwenden. Bei einer neuen Adresse den QR neu scannen.
+Die Kopplung bleibt auch nach Neustart des Servers gültig (der Schlüssel steht in `.pairkey`), solange sich die WLAN-Adresse des Laptops nicht ändert.
 
 ### Was der Besucher sieht
 
@@ -162,7 +162,7 @@ Nach dem Scannen öffnet sich `foto.html`:
 
 ### Beenden
 
-Im Terminal **Strg+C**. Der Tunnel wird mitbeendet. Die Fotos im Ordner `photos/` bleiben liegen und werden beim nächsten Start nach Ablauf der Zeit gelöscht. Wer alles sofort löschen will, löscht den Ordner `photos/`.
+Im Terminal **Strg+C**. Der Tunnel wird mitbeendet. Die Fotos im Ordner `photos/` werden beim nächsten Start nach Ablauf der Zeit gelöscht, oder gleich über **🗑️ Alle Fotos löschen**.
 
 ---
 
@@ -175,32 +175,26 @@ Im Terminal **Strg+C**. Der Tunnel wird mitbeendet. Die Fotos im Ordner `photos/
 | `PAGES_URL` | `https://schnax3.github.io/web-cam-upload/` | Adresse der GitHub-Pages-Seite. Dorthin führt der QR-Code zum Abholen. Mit `/` am Ende. |
 | `LOCAL_SERVER` | leer | Adresse des Foto-Servers. Leer = derselbe Server, von dem die Seite kommt. Normalerweise nie ändern. |
 | `MAX_SIZE` | `1600` | Längste Kante des Fotos in Pixeln. Größer = schärfer, aber größere Dateien. |
-| `COUNTDOWN` | `3` | Sekunden bis zum Auslösen der Laptop-Kamera. `0` = sofort. |
+| `COUNTDOWN` | `3` | Vorgabe für den Countdown (auf der Laptop-Seite umstellbar). |
 | `TITLE` | `Foto-Aktion` | Titel oben auf der Laptop-Seite. |
 
-Die Laptop- und Handy-Seite kommen direkt vom Server, Änderungen an `config.js` wirken dort sofort nach Neuladen. `foto.html` auf GitHub Pages liest `config.js` nicht, dort ist nichts zu pushen.
+Die Laptop- und Handy-Seite kommen direkt vom Server, Änderungen wirken nach Neuladen. `foto.html` auf GitHub Pages liest `config.js` nicht.
 
 ### `foto_server.py`
 
 | Option | Standard | Bedeutung |
 |---|---|---|
 | `--ttl 2` | `24` | Stunden, nach denen Fotos gelöscht werden. Bruchteile gehen auch (`--ttl 0.5`). |
-| `--port 8766` | `8765` | Port des Servers. |
+| `--port 8766` | `8765` | Port der Laptop-Seite (nur lokal erreichbar). |
+| `--phone-port 8767` | `8766` | Port für das Handy im WLAN (https). |
 | `--origin https://...` | `https://schnax3.github.io` | Adresse der Pages-Seite (nur Protokoll + Domain, ohne Pfad). Nur diese Seite darf Fotos im Browser abrufen. |
-| `--public-url https://...` | Cloudflare-Tunnel | Eigene öffentliche https-Adresse statt Cloudflare-Tunnel. |
+| `--public-url https://...` | automatischer Tunnel | Eigene öffentliche https-Adresse (z. B. Tailscale Funnel) statt Cloudflare-Tunnel. |
 | `--no-tunnel` | aus | Keinen Tunnel starten (zum Testen). |
-| `--no-lan` | aus | Nur der Laptop selbst darf zugreifen, kein Handy im WLAN. |
-| `--lan-ip 192.168.1.23` | automatisch | WLAN-Adresse des Laptops, falls die automatische Erkennung die falsche nimmt (z. B. bei VPN oder mehreren Netzwerkkarten). |
-| `--key abc123` | zufällig | Eigener Kopplungsschlüssel (6–64 Zeichen: Buchstaben, Ziffern, `_`, `-`). Standard: zufällig erzeugt und in `.pairkey` gespeichert. Datei löschen = neuer Schlüssel. |
-
-Beispiele:
-
-```
-python foto_server.py --ttl 2
-python foto_server.py --lan-ip 192.168.178.20
-python foto_server.py --public-url https://laptop.mein-tailnet.ts.net
-python foto_server.py --no-tunnel --no-lan
-```
+| `--no-lan` | aus | Kein Handy zulassen. Nur Laptop-Kamera. |
+| `--lan-ip 192.168.1.23` | automatisch | WLAN-Adresse des Laptops, falls die automatische Erkennung die falsche nimmt (VPN, mehrere Netzwerkkarten). |
+| `--key abc123` | zufällig | Eigener Kopplungsschlüssel (6–64 Zeichen: Buchstaben, Ziffern, `_`, `-`). |
+| `--no-install` | aus | Nichts automatisch herunterladen/installieren (cloudflared, cryptography). |
+| `--no-browser` | aus | Browser nicht automatisch öffnen. |
 
 ---
 
@@ -208,24 +202,26 @@ python foto_server.py --no-tunnel --no-lan
 
 ### Wer darf was?
 
-Der Server prüft bei **jeder** Anfrage, woher sie kommt:
+Der Server prüft bei **jeder** Anfrage, woher sie kommt, und die Laptop-Seite ist nur lokal erreichbar (Port 8765 hört nur auf `127.0.0.1`):
 
 | Herkunft | Erkennung | Erlaubt |
 |---|---|---|
-| **Laptop selbst** | Loopback-Adresse, kein Tunnel-Header | Alles (Laptop-Seite, Foto hochladen, Status). |
-| **Handy im WLAN** | private Adresse, kein Tunnel-Header | Nur `handy.html` (samt `style.css`, `config.js`), „Lebenszeichen“ und Foto senden, **und nur mit dem Kopplungsschlüssel**. |
+| **Laptop selbst** | Loopback-Adresse, kein Tunnel-Header | Alles: Seite, Steuerbefehle, Livebild, Foto hochladen, Löschen. |
+| **Handy im WLAN** | private Adresse, kein Tunnel-Header | Nur `handy.html` (samt `style.css`, `config.js`), Livebild senden und Foto senden, **und nur mit dem Kopplungsschlüssel**. Es kann nichts steuern, nichts ansehen, nichts löschen. |
 | **Internet (Tunnel)** | Tunnel-Header (`Cf-Ray`, `X-Forwarded-For`, …) | Nur `GET /img/<Token>`. Alles andere: 403/404. |
 
 Weitere Schutzmaßnahmen:
 
-- Der **Schlüssel** für das Handy ist zufällig (ca. 72 Bit). Jemand anderes im selben WLAN, der die Handy-Adresse ohne Schlüssel aufruft, kann nichts senden.
-- Der `Host`-Header muss `localhost` bzw. eine IP-Adresse sein (Schutz vor DNS-Rebinding), und ein Browser-`Origin` muss zur Seite passen (fremde Webseiten können nichts einschleusen).
-- Es werden nur JPEG-Dateien bis 12 MB angenommen.
-- Über den Tunnel ist **nichts außer den Fotos** erreichbar: Weder `laptop.html` noch `foto_server.py` noch der Ordner `photos/` lassen sich von außen laden.
+- Der Schlüssel fürs Handy ist zufällig (ca. 72 Bit). Wer im selben WLAN die Handy-Adresse ohne Schlüssel aufruft, kann nichts senden.
+- Die Verbindung Handy ↔ Laptop ist per TLS verschlüsselt.
+- Der `Host`-Header muss `localhost` bzw. eine IP-Adresse sein (Schutz vor DNS-Rebinding), und ein Browser-`Origin` muss zur Seite passen (fremde Webseiten können im Browser des Laptops nichts auslösen).
+- Es werden nur JPEG-Dateien angenommen (Foto max. 12 MB, Livebild-Einzelbild max. 3 MB).
+- Über den Tunnel ist **nichts außer den Fotos** erreichbar: Weder die Laptop-Seite noch das Livebild noch `foto_server.py` noch der Ordner `photos/`.
+- Das Livebild des Handys wird nie gespeichert, nur das jeweils letzte Einzelbild liegt kurz im Arbeitsspeicher.
 
 ### Wer kann Fotos sehen?
 
-- Jedes Foto bekommt beim Speichern einen zufälligen Token (128 Bit, `secrets.token_urlsafe`). Der ist nicht erratbar.
+- Jedes Foto bekommt beim Speichern einen zufälligen Token (128 Bit). Der ist nicht erratbar.
 - Der Token steht nur im QR-Code, im `#`-Teil des Links. Dieser Teil wird vom Browser nie an einen Server geschickt, taucht also in keinen Zugriffsprotokollen auf.
 - Es gibt keine Liste, keinen Ordnerinhalt, keine Suche. Falscher Token = 404.
 - Wer den QR-Code fotografiert oder den Link weitergibt, kann das Foto bis zum Ablauf sehen. Das ist bei „nur mit QR-Code“ nicht vermeidbar.
@@ -234,16 +230,17 @@ Weitere Schutzmaßnahmen:
 
 | Dienst | Was er sieht |
 |---|---|
-| **GitHub Pages** | Liefert nur `foto.html` und die zugehörige Seite (Code). Fotos laufen nie darüber. |
+| **GitHub** | Liefert `foto.html` (Code) über GitHub Pages und beim ersten Start die cloudflared-Programmdatei. Fotos laufen nie darüber. |
 | **Cloudflare (Tunnel)** | Leitet die Abrufe der Fotos durch. Technisch sieht Cloudflare den Datenverkehr, wie bei jedem Tunnel/Proxy. |
+| **PyPI** | Einmalig beim Installieren von `cryptography`. |
 
-Kamera, Kopplung und Speicherung laufen komplett im lokalen Netz. Es gibt keinen Vermittlungsserver mehr.
+Kamera, Livebild, Steuerung und Speicherung laufen komplett im lokalen Netz.
 
 ### Hinweise für den Stand
 
 - Es werden Fotos von Personen gemacht. Ein gut sichtbares Schild hilft: „Foto wird bis zu 24 Stunden auf dem Laptop gespeichert und danach gelöscht; nur mit dem QR-Code abrufbar.“ Bei Minderjährigen vorher klären, ob das für eure Veranstaltung eine Einwilligung der Eltern braucht.
-- Nach der Aktion `photos/` löschen oder `--ttl` kurz wählen.
-- Das WLAN sollte nicht für Fremde offen sein (die Handy-Seite ist im ganzen WLAN erreichbar, durch den Schlüssel aber nur für das gekoppelte Handy nutzbar). Am besten Handy-Hotspot oder eigenes WLAN für den Stand.
+- Nach der Aktion **🗑️ Alle Fotos löschen** oder `--ttl` kurz wählen.
+- Das WLAN sollte nicht für Fremde offen sein. Am besten eigenes WLAN oder Handy-Hotspot für den Stand.
 - Der Laptop sollte während der Aktion nicht in den Ruhezustand gehen (Energieeinstellungen).
 
 ---
@@ -251,50 +248,64 @@ Kamera, Kopplung und Speicherung laufen komplett im lokalen Netz. Es gibt keinen
 ## Probleme und Lösungen
 
 **Laptop-Seite zeigt „Server nicht erreichbar“**
-- Läuft `python foto_server.py` noch? Das Terminal-Fenster darf nicht geschlossen sein.
+- Läuft `foto_server.py` noch? Das Terminal-Fenster darf nicht geschlossen sein.
 - Die Seite muss unter `http://localhost:8765/` geöffnet sein, nicht unter der GitHub-Pages-Adresse.
-- Port belegt? Mit `--port 8766` starten und `http://localhost:8766/` öffnen.
+- Port belegt? Mit `--port 8770` starten und `http://localhost:8770/` öffnen.
 
-**Handy zeigt „Keine Verbindung zum Laptop“ oder die Seite lädt gar nicht**
+**„Tunnel startet …“ bleibt stehen**
+- Im Terminal steht der Grund. Meist keine Internetverbindung oder ein Netz, das Cloudflare-Tunnel blockiert (Firmen-/Schulnetz). Dann Handy-Hotspot für den Laptop nutzen. Der Server versucht es automatisch weiter.
+- Download von cloudflared nicht möglich? Manuell installieren (`winget install Cloudflare.cloudflared` bzw. `brew install cloudflared`) oder `--public-url` mit einem eigenen Tunnel angeben.
+- Die Tunnel-Adresse ändert sich bei jedem Start und jedem automatischen Neustart des Tunnels. **Bereits angezeigte QR-Codes funktionieren danach nicht mehr.** Neue Fotos bekommen immer die aktuelle Adresse.
+
+**Handy lädt die Seite nicht**
 - Handy und Laptop müssen im **selben WLAN** sein (nicht Mobilfunk, nicht Gast-WLAN mit Geräteisolation). Manche öffentlichen/Schul-WLANs trennen Geräte voneinander: dann Handy-Hotspot für beide nutzen (Laptop ins Hotspot-WLAN).
 - Windows-Firewall: Python für **private Netzwerke** erlauben (Einstellungen → Firewall → App zulassen).
-- Falsche Adresse im QR (z. B. VPN-Adapter)? Server mit `--lan-ip <richtige WLAN-IP>` starten. Die IP des Laptops zeigt `ipconfig` (Windows) bzw. `ip a` (Linux).
-- „Schlüssel falsch – QR neu scannen“: QR auf der Laptop-Seite erneut scannen (der Schlüssel wurde geändert, z. B. wegen gelöschter `.pairkey`).
+- Falsche Adresse im QR (z. B. VPN-Adapter)? Server mit `--lan-ip <richtige WLAN-IP>` starten. Die IP zeigt `ipconfig` (Windows) bzw. `ip a` (Linux).
 
-**Handy hat Vorrang, aber ich will die Laptop-Kamera**
-- Handy-Seite schließen. Nach ca. 8 Sekunden ist wieder die Laptop-Kamera aktiv.
+**Handy meldet „Kamera nicht erlaubt“ / „braucht https“**
+- Der Server konnte das Zertifikat nicht erzeugen. Im Terminal `pip install cryptography` ausführen (nicht mit `--no-install` gestartet?), Server neu starten, QR neu scannen.
 
-**Laptop-Seite bleibt auf „Handy-Kamera aktiv“, obwohl das Handy weg ist**
-- Das Handy sendet nur, solange die Seite offen und der Bildschirm an ist. Sperrt das Handy den Bildschirm, bricht die Verbindung nach 8 Sekunden ab und die Laptop-Kamera übernimmt. Beim Entsperren verbindet sich das Handy von selbst wieder.
+**Handy meldet „Schlüssel falsch – QR neu scannen“**
+- Der Schlüssel hat sich geändert (z. B. `.pairkey` gelöscht). QR auf der Laptop-Seite neu scannen.
 
-**„Server ohne Tunnel“ / „cloudflared ist nicht installiert“**
-- cloudflared installieren (siehe oben), **neues Terminal öffnen**, `cloudflared --version` prüfen.
-- Oder `--public-url` mit einem eigenen Tunnel angeben.
-- Firmen- oder Schulnetz kann Tunnel blockieren. Dann Handy-Hotspot für den Laptop nutzen.
+**Handy zeigt „Keine Verbindung zum Laptop“**
+- Laptop im WLAN erreichbar? Bei geänderter WLAN-Adresse des Laptops den QR neu scannen. Handy-Bildschirm muss an sein und die Seite im Vordergrund.
+
+**Das Handy-Livebild ruckelt**
+- Es sind ca. 9 Bilder pro Sekunde bei 640 Pixeln. Näher an den Router, 5-GHz-WLAN nutzen. Das Foto selbst kommt unabhängig davon in voller Qualität.
+
+**Ich will wieder die Laptop-Kamera**
+- Handy-Seite schließen. Nach ca. 4 Sekunden ist die Laptop-Kamera wieder aktiv.
 
 **Laptop-Kamera zeigt schwarzes Bild oder Fehlermeldung**
-- Kamera-Zugriff im Browser erlauben (Schloss-Symbol in der Adresszeile).
-- Wird die Kamera von einem anderen Programm benutzt (Teams, Zoom, OBS)? Dort beenden.
+- Kamera-Zugriff im Browser erlauben (Schloss-Symbol in der Adresszeile). Wird die Kamera von einem anderen Programm benutzt (Teams, Zoom, OBS)? Dort beenden.
 
 **Foto-Seite meldet „Dieses Foto gibt es nicht mehr“**
-- Abgelaufen (`--ttl`) oder `photos/` wurde gelöscht.
+- Abgelaufen (`--ttl`) oder gelöscht.
 
 **Foto-Seite meldet „Der Foto-Server ist gerade nicht erreichbar“**
-- Laptop aus, offline, Server oder Tunnel beendet. Nach einem Neustart des Servers hat sich die Tunnel-Adresse geändert, **alte QR-Codes funktionieren dann nicht mehr**. Neue Fotos machen.
+- Laptop aus, offline oder Tunnel gerade neu gestartet (siehe oben, alte QR-Codes sind dann ungültig).
 
 **Der QR-Code lässt sich schlecht scannen**
-- Browserfenster größer machen oder den Laptop-Bildschirm heller stellen. Der QR-Code skaliert mit dem Fenster. Er ist weiß hinterlegt und hat eine ruhige Zone, funktioniert also auch auf dunklem Hintergrund.
+- Browserfenster größer machen oder Bildschirm heller stellen. Der QR-Code skaliert mit dem Fenster und ist weiß hinterlegt.
 
 **Download-Button macht am iPhone nichts Sichtbares**
-- Das iPhone legt die Datei in der Dateien-App unter „Downloads“ ab. Besser: den Button **📤 Teilen / Sichern** nehmen und „Bild sichern“ wählen, dann landet es in Fotos.
+- Das iPhone legt die Datei in der Dateien-App unter „Downloads“ ab. Besser: **📤 Teilen / Sichern** nehmen und „Bild sichern“ wählen, dann landet es in Fotos.
 
 ---
 
 ## Technik im Detail
 
-### Warum öffnet das Handy die Kamera-App statt einer Live-Vorschau?
+### Zwei Server-Ports
 
-Browser erlauben den Live-Zugriff auf die Kamera nur über https oder `localhost`. Die Handy-Seite läuft aber über `http://<Laptop-IP>` im lokalen Netz (ohne Zertifikat, ohne Warnmeldungen). Deshalb nutzt sie das `capture`-Feld: Das öffnet die Kamera-App des Handys, die ohnehin die bessere Qualität hat. Das Foto wird danach auf `MAX_SIZE` verkleinert und gesendet.
+| Port | Adresse | Zweck |
+|---|---|---|
+| `8765` (HTTP) | nur `127.0.0.1` | Laptop-Seite und Steuerung. `localhost` zählt für Browser als sicher (Kamera funktioniert). Der Cloudflare-Tunnel zeigt ebenfalls auf diesen Port, dort kommen aber nur Abrufe von `/img/<Token>` durch. |
+| `8766` (HTTPS) | WLAN (`0.0.0.0`) | Nur für das Handy. Selbstsigniertes Zertifikat für die WLAN-Adresse, weil Browser die Kamera nur über https erlauben. |
+
+### Handy → Laptop
+
+Das Handy schickt etwa 9-mal pro Sekunde ein verkleinertes Einzelbild (`POST /phone/frame`, 640 px). Die Antwort enthält die offenen Befehle des Laptops (`shoot`, `flip`). So braucht es keine dauerhafte Verbindung und keinen zusätzlichen Dienst. Der Server reicht die Einzelbilder als Motion-JPEG an den Laptop weiter (`GET /stream`). Bei `shoot` nimmt das Handy ein Foto in voller Auflösung (längste Kante `MAX_SIZE`) und sendet es per `POST /phone/photo`. Nach 4 Sekunden ohne Livebild gilt das Handy als getrennt.
 
 ### Der Link im QR-Code zum Abholen
 
@@ -312,15 +323,18 @@ Die Filter rechnen jeden Pixel selbst (Sepia, Graustufen, Sättigung, Kontrast, 
 
 | Anfrage | Wer darf | Zweck |
 |---|---|---|
-| `GET /info` | Laptop | `public_url`, `ttl`, Handy-Link (`lan_url`). |
-| `GET /status` | Laptop | `phone` (Handy verbunden?), `seq` (Zähler der Handy-Fotos), `token` (letztes Handy-Foto). Die Laptop-Seite fragt das jede Sekunde ab. |
-| `POST /upload` | Laptop | Foto der Laptop-Kamera (JPEG) speichern, gibt `{token, expires_in}` zurück. |
-| `POST /phone/hello` | Handy/Laptop + Schlüssel | Lebenszeichen des Handys alle 3 s. Nach 8 s ohne Lebenszeichen gilt das Handy als getrennt. |
-| `POST /phone/photo` | Handy/Laptop + Schlüssel | Foto vom Handy (JPEG) speichern, erhöht `seq`. |
-| `GET /img/<Token>` | jeder mit Token | Liefert das Foto. |
-| `GET /`, `*.html`, `*.js`, `*.css` | Laptop alles, Handy nur `handy.html`, `style.css`, `config.js` | Seiten ausliefern. Nur diese Dateitypen im Projektordner, nie `.py` oder Fotos. |
+| `GET /info` | Laptop | Abhol-Adresse, Aufbewahrungszeit, Handy-Link. |
+| `GET /status` | Laptop | Handy verbunden?, Zähler und Token des letzten Handy-Fotos, Anzahl Fotos, Tunnel bereit? Die Laptop-Seite fragt das jede Sekunde ab. |
+| `GET /stream` | Laptop | Livebild des Handys (Motion-JPEG). |
+| `POST /cmd` | Laptop | Befehl `shoot` oder `flip` an das Handy. |
+| `POST /upload` | Laptop | Foto der Laptop-Kamera speichern. |
+| `POST /clear` | Laptop | Alle Fotos löschen. |
+| `POST /phone/frame` | Handy + Schlüssel | Livebild-Einzelbild senden, Befehle abholen. |
+| `POST /phone/photo` | Handy + Schlüssel | Foto in voller Größe senden. |
+| `GET /img/<Token>` | jeder mit Token | Liefert das Foto. Nur diese Anfrage erreicht den Server über den Tunnel. |
+| `GET /`, `*.html`, `*.js`, `*.css` | Laptop alles, Handy nur `handy.html`, `style.css`, `config.js` | Seiten ausliefern. Nie `.py`, Fotos oder Schlüssel. |
 
-Fotos liegen als `photos/<Token>.jpg`. Ein Hintergrund-Thread löscht jede Minute alles, was älter als `--ttl` ist. Der Ordner und `.pairkey` stehen in `.gitignore`. In der Server-Ausgabe erscheinen Tokens nicht.
+Fotos liegen als `photos/<Token>.jpg`. Ein Hintergrund-Thread löscht jede Minute alles, was älter als `--ttl` ist. `photos/`, `bin/`, `certs/` und `.pairkey` stehen in `.gitignore` und werden nie committet.
 
 ---
 
@@ -329,16 +343,18 @@ Fotos liegen als `photos/<Token>.jpg`. Ein Hintergrund-Thread löscht jede Minut
 Am besten am Vortag mit dem echten Laptop, dem echten WLAN und einem fremden Handy:
 
 - [ ] GitHub Pages ist an, `https://schnax3.github.io/web-cam-upload/` öffnet sich
-- [ ] `python foto_server.py` zeigt eine `trycloudflare.com`-Adresse und eine Handy-Adresse mit der richtigen WLAN-IP
-- [ ] `http://localhost:8765/`: **Server ✓** grün, Laptop-Kamera läuft
+- [ ] `start.bat` / `start.sh` startet ohne Fehler, Browser öffnet sich, **Server ✓ Tunnel ✓** ist grün
+- [ ] Windows-Firewall: Python in privaten Netzwerken erlaubt
 - [ ] Foto mit der Laptop-Kamera, QR erscheint
 - [ ] QR mit einem fremden Handy **im Mobilfunk** (WLAN aus) scannen, Foto lädt
 - [ ] Filter wechseln, Herunterladen funktioniert, Datei ist in der Foto-App/Downloads
-- [ ] Eigenes Handy im WLAN koppeln: Laptop-Seite wechselt auf „Handy-Kamera aktiv“, Laptop-Kamera geht aus
-- [ ] Foto am Handy aufnehmen, es erscheint am Laptop mit QR-Code
-- [ ] Handy-Seite schließen: nach ca. 8 s ist wieder die Laptop-Kamera aktiv
-- [ ] Server beenden und neu starten: neues Foto geht, altes sagt sauber „nicht erreichbar“
-- [ ] Windows-Firewall erlaubt Python im privaten Netzwerk, Laptop-Ruhezustand ist aus, Netzteil steckt
+- [ ] Eigenes Handy koppeln (Zertifikatswarnung bestätigen, Kamera erlauben): Livebild erscheint am Laptop, Laptop-Kamera pausiert
+- [ ] „Foto machen“ am Laptop löst am Handy aus, Foto erscheint mit QR-Code
+- [ ] 🔄 wechselt zwischen Hinter- und Frontkamera
+- [ ] Handy-Seite schließen: nach ca. 4 s ist wieder die Laptop-Kamera aktiv
+- [ ] 🗑️ Alle Fotos löschen funktioniert
+- [ ] Server beenden und neu starten: neues Foto geht, alter QR sagt sauber „nicht erreichbar“
+- [ ] Laptop-Ruhezustand ist aus, Netzteil steckt
 
 ---
 

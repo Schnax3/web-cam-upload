@@ -10,15 +10,21 @@
   header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.5rem; gap: 1rem; flex-wrap: wrap; }
   header h1 { margin: 0; font-size: 1.5rem; }
   main { flex: 1; display: grid; grid-template-columns: 1fr 22rem; gap: 1.5rem; padding: 0 1.5rem 1.5rem; align-items: start; }
+  .side { display: flex; flex-direction: column; gap: 1rem; }
   .panel { background: var(--panel); border-radius: 18px; padding: 1.2rem; }
   .panel h2 { font-size: 1.1rem; }
   .panel p { color: var(--muted); font-size: .9rem; margin: .5em 0; }
-  .shoot { display: flex; justify-content: center; margin-top: 1rem; }
+  .shoot { display: flex; justify-content: center; gap: .8rem; margin-top: 1rem; flex-wrap: wrap; }
   .shoot button { font-size: 1.5rem; padding: .8em 2.4em; }
-  .phonebox { background: var(--panel); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5rem; text-align: center; padding: 1rem; }
-  .phonebox .big { font-size: 4rem; }
-  .phonebox h2 { margin: 0; font-size: 1.8rem; }
-  .phonebox p { color: var(--muted); margin: 0; }
+  .shoot button.small { font-size: 1.1rem; padding: .8em 1.2em; }
+  .cam video, .cam img { width: 100%; height: 100%; display: block; }
+  .cam video { object-fit: cover; }
+  .cam img { object-fit: contain; background: #000; }
+  .badge { position: absolute; top: .8rem; left: .8rem; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: .8rem; margin: .6rem 0; }
+  .row label { color: var(--muted); font-size: .9rem; }
+  select { font: inherit; background: #2b3550; color: var(--text); border: 0; border-radius: 10px; padding: .5em .8em; }
+  .full { width: 100%; }
 
   /* Ergebnis */
   #result { display: grid; grid-template-columns: 1fr 22rem; gap: 1.5rem; align-items: center; }
@@ -29,6 +35,7 @@
   .spinner { width: 3rem; height: 3rem; border: 5px solid #2b3550; border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin: 3rem auto; }
   @keyframes spin { to { transform: rotate(360deg); } }
   #pairLink { word-break: break-all; font-size: .75rem; color: var(--muted); }
+  #tunnelLink { word-break: break-all; font-size: .75rem; }
 
   @media (max-width: 900px) {
     main, #result { grid-template-columns: 1fr; }
@@ -50,26 +57,42 @@
 
 <main id="camView">
   <section>
-    <!-- Laptop-Kamera (solange kein Handy verbunden ist) -->
-    <div id="webcamBox" class="cam">
+    <div class="cam">
       <video id="video" class="mirror" autoplay playsinline muted></video>
+      <img id="phoneStream" class="hidden" alt="Livebild vom Handy">
+      <span id="badge" class="status badge hidden">📱 Handy-Kamera</span>
       <div id="count" class="count"></div>
       <div id="flash" class="flash"></div>
     </div>
-    <!-- Handy hat Vorrang -->
-    <div id="phoneBox" class="cam phonebox hidden">
-      <div class="big">📱</div>
-      <h2>Handy-Kamera aktiv</h2>
-      <p>Foto am Handy aufnehmen – es erscheint hier automatisch.</p>
-    </div>
     <div id="camError" class="error hidden"></div>
-    <div class="shoot"><button id="shootBtn">📸 Foto machen</button></div>
+    <div class="shoot">
+      <button id="shootBtn">📸 Foto machen</button>
+      <button id="flipBtn" class="secondary small hidden">🔄 Handy-Kamera wechseln</button>
+    </div>
   </section>
-  <aside class="panel">
-    <h2>Handy koppeln</h2>
-    <p>Handy ins selbe WLAN und diesen QR-Code scannen. Sobald das Handy verbunden ist, wird die Handy-Kamera benutzt und die Laptop-Kamera pausiert.</p>
-    <div id="pairQr" class="qr hidden"></div>
-    <p id="pairLink"></p>
+
+  <aside class="side">
+    <div class="panel">
+      <h2>Steuerung</h2>
+      <div class="row">
+        <label for="cdSel">Countdown</label>
+        <select id="cdSel">
+          <option value="0">aus</option>
+          <option value="3">3 Sekunden</option>
+          <option value="5">5 Sekunden</option>
+          <option value="10">10 Sekunden</option>
+        </select>
+      </div>
+      <button id="clearBtn" class="secondary full">🗑️ Alle Fotos löschen (<span id="photoCount">0</span>)</button>
+      <p>Abhol-Adresse: <span id="tunnelLink">noch keine</span></p>
+    </div>
+    <div class="panel">
+      <h2>Handy als externe Kamera</h2>
+      <p>Handy ins selbe WLAN und diesen QR-Code scannen. Alles weitere (Livebild, Auslösen, Kamera wechseln) steuerst du hier am Laptop.</p>
+      <div id="pairQr" class="qr hidden"></div>
+      <p id="pairLink"></p>
+      <p id="certHint" class="hidden">Beim ersten Mal zeigt das Handy eine Warnung zum Zertifikat (der Laptop stellt es selbst aus). Auf „Erweitert“ → „Trotzdem fortfahren“ tippen.</p>
+    </div>
   </aside>
 </main>
 
@@ -107,8 +130,21 @@
   let phoneOn = false;
   let seqSeen = null;
   let lastGetUp = null;
-  let info = null;
   let lastLanUrl = null;
+  let awaitingPhoto = 0;
+
+  function showError(msg) {
+    $("camError").textContent = msg;
+    $("camError").classList.remove("hidden");
+  }
+
+  // ---------- Countdown-Einstellung (bleibt im Browser gespeichert) ----------
+  let saved = null;
+  try { saved = localStorage.getItem("wcu-countdown"); } catch (e) {}
+  $("cdSel").value = saved !== null && [...$("cdSel").options].some((o) => o.value === saved) ? saved : String(CFG.COUNTDOWN);
+  $("cdSel").addEventListener("change", () => {
+    try { localStorage.setItem("wcu-countdown", $("cdSel").value); } catch (e) {}
+  });
 
   // ---------- Laptop-Kamera ----------
   async function initCamera() {
@@ -116,27 +152,51 @@
       await WCU.startCamera($("video"), "user");
       $("camError").classList.add("hidden");
     } catch (e) {
-      $("camError").textContent = "Laptop-Kamera nicht nutzbar: " + e.message;
-      $("camError").classList.remove("hidden");
+      showError("Laptop-Kamera nicht nutzbar: " + e.message);
     }
   }
 
+  // ---------- Foto auslösen (Laptop-Kamera oder Handy, je nachdem was aktiv ist) ----------
   $("shootBtn").addEventListener("click", async () => {
-    if (busy || phoneOn) return;
+    if (busy) return;
     busy = true;
     $("shootBtn").disabled = true;
+    $("camError").classList.add("hidden");
     try {
-      await WCU.countdown($("count"), CFG.COUNTDOWN);
-      WCU.flash($("flash"));
-      const blob = await WCU.snapshot($("video"));
-      present(URL.createObjectURL(blob), () => WCU.uploadBlob(blob));
+      await WCU.countdown($("count"), parseInt($("cdSel").value, 10) || 0);
+      if (phoneOn) {
+        await WCU.sendCmd("shoot");
+        awaitingPhoto = Date.now();
+        setTimeout(() => {
+          if (awaitingPhoto && Date.now() - awaitingPhoto >= 9000) {
+            awaitingPhoto = 0;
+            showError("Das Handy hat kein Foto geschickt. Ist die Handy-Seite noch offen?");
+          }
+        }, 10000);
+      } else {
+        WCU.flash($("flash"));
+        const blob = await WCU.snapshot($("video"));
+        present(URL.createObjectURL(blob), () => WCU.uploadBlob(blob));
+      }
     } catch (e) {
-      $("camError").textContent = e.message;
-      $("camError").classList.remove("hidden");
+      showError(e.message);
     } finally {
       busy = false;
       $("shootBtn").disabled = false;
     }
+  });
+
+  $("flipBtn").addEventListener("click", async () => {
+    try { await WCU.sendCmd("flip"); } catch (e) { showError(e.message); }
+  });
+
+  $("clearBtn").addEventListener("click", async () => {
+    if (!confirm("Wirklich alle gespeicherten Fotos löschen? Bereits gescannte QR-Codes funktionieren dann nicht mehr.")) return;
+    try {
+      const n = await WCU.clearPhotos();
+      $("photoCount").textContent = "0";
+      alert(n + " Foto(s) gelöscht.");
+    } catch (e) { showError(e.message); }
   });
 
   // ---------- Ergebnis anzeigen ----------
@@ -177,29 +237,43 @@
 
   // Foto, das vom Handy geschickt wurde (liegt schon auf dem Server)
   function presentFromPhone(token) {
+    awaitingPhoto = 0;
+    WCU.flash($("flash"));
     present(WCU.server() + "/img/" + encodeURIComponent(token), async () => {
       const i = await WCU.serverInfo();
-      if (!i.public_url) throw new Error("Der Server hat keine Abhol-Adresse (Cloudflare-Tunnel fehlt).");
+      if (!i.public_url) throw new Error("Noch keine Abhol-Adresse (der Tunnel startet gerade). Gleich nochmal versuchen.");
       return { token: token, publicUrl: i.public_url, ttl: i.ttl };
     });
   }
 
   // ---------- Handy hat Vorrang ----------
+  function connectStream() {
+    $("phoneStream").src = WCU.server() + "/stream?" + Date.now();
+  }
+  // Reißt das Livebild ab, während das Handy noch verbunden ist, neu verbinden
+  $("phoneStream").addEventListener("error", () => {
+    if (phoneOn) setTimeout(() => { if (phoneOn) connectStream(); }, 1000);
+  });
+
   function setPhone(on) {
     if (on === phoneOn) return;
     phoneOn = on;
     const el = $("phoneStatus");
     if (on) {
       WCU.stopCamera();
-      $("webcamBox").classList.add("hidden");
-      $("phoneBox").classList.remove("hidden");
-      $("shootBtn").classList.add("hidden");
+      $("video").classList.add("hidden");
+      $("phoneStream").classList.remove("hidden");
+      $("badge").classList.remove("hidden");
+      $("flipBtn").classList.remove("hidden");
+      connectStream();
       el.textContent = "Handy verbunden ✓";
       el.className = "status ok";
     } else {
-      $("phoneBox").classList.add("hidden");
-      $("webcamBox").classList.remove("hidden");
-      $("shootBtn").classList.remove("hidden");
+      $("phoneStream").removeAttribute("src");
+      $("phoneStream").classList.add("hidden");
+      $("badge").classList.add("hidden");
+      $("flipBtn").classList.add("hidden");
+      $("video").classList.remove("hidden");
       el.textContent = "Handy: nicht verbunden";
       el.className = "status";
       initCamera();
@@ -208,7 +282,6 @@
 
   // ---------- Server abfragen ----------
   async function poll() {
-    const el = $("serverStatus");
     try {
       const s = await WCU.serverStatus();
       if (seqSeen === null) seqSeen = s.seq; // alte Fotos beim Laden nicht anzeigen
@@ -216,26 +289,29 @@
         seqSeen = s.seq;
         if (s.token) presentFromPhone(s.token);
       }
+      $("photoCount").textContent = s.photos;
       setPhone(s.phone);
+      const el = $("serverStatus");
+      if (s.tunnel) { el.textContent = "Server ✓ Tunnel ✓"; el.className = "status ok"; }
+      else { el.textContent = "Tunnel startet …"; el.className = "status err"; }
       return true;
     } catch (e) {
-      el.textContent = "Server nicht erreichbar";
-      el.className = "status err";
+      $("serverStatus").textContent = "Server nicht erreichbar";
+      $("serverStatus").className = "status err";
       return false;
     }
   }
 
   async function loadInfo() {
-    const el = $("serverStatus");
     try {
-      info = await WCU.serverInfo();
-      if (info.public_url) { el.textContent = "Server ✓"; el.className = "status ok"; }
-      else { el.textContent = "Server ohne Tunnel"; el.className = "status err"; }
+      const info = await WCU.serverInfo();
+      $("tunnelLink").textContent = info.public_url || "noch keine (Tunnel startet / fehlt)";
       if (info.lan_url && info.lan_url !== lastLanUrl) {
         lastLanUrl = info.lan_url;
         WCU.renderQR($("pairQr"), info.lan_url);
         $("pairQr").classList.remove("hidden");
         $("pairLink").textContent = info.lan_url;
+        $("certHint").classList.toggle("hidden", !info.tls);
       } else if (!info.lan_url) {
         $("pairQr").classList.add("hidden");
         $("pairLink").textContent = "Keine WLAN-Adresse gefunden. Server mit --lan-ip 192.168.x.x starten.";
@@ -248,7 +324,7 @@
     await loadInfo();
     if (!phoneOn) initCamera();
     setInterval(poll, 1000);
-    setInterval(loadInfo, 10000);
+    setInterval(loadInfo, 5000);
   })();
 })();
 </script>

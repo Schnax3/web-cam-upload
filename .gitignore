@@ -1,3 +1,5 @@
 photos/
 __pycache__/
 .pairkey
+bin/
+certs/

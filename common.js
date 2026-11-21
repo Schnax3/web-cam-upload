@@ -66,8 +66,26 @@
     if (!r.ok) throw new Error("Server antwortet nicht richtig (" + r.status + ").");
     return r.json();
   }
-  const serverInfo = () => getJson("/info");   // { public_url, ttl, lan_url }
-  const serverStatus = () => getJson("/status"); // { phone, seq, token }
+  const serverInfo = () => getJson("/info");   // { public_url, ttl, lan_url, tls }
+  const serverStatus = () => getJson("/status"); // { phone, seq, token, photos, tunnel }
+
+  // Befehl an das Handy ("shoot" = auslösen, "flip" = Kamera wechseln)
+  async function sendCmd(cmd) {
+    const r = await fetch(server() + "/cmd", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cmd: cmd }),
+    });
+    if (r.status === 409) throw new Error("Kein Handy verbunden.");
+    if (!r.ok) throw new Error("Befehl fehlgeschlagen (" + r.status + ").");
+  }
+
+  // Alle gespeicherten Fotos löschen, gibt die Anzahl zurück
+  async function clearPhotos() {
+    const r = await fetch(server() + "/clear", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    if (!r.ok) throw new Error("Löschen fehlgeschlagen (" + r.status + ").");
+    return (await r.json()).deleted;
+  }
 
   // Foto der Laptop-Kamera zum Server schicken. Gibt { token, publicUrl, ttl } zurück.
   async function uploadBlob(blob) {
@@ -121,5 +139,5 @@
       d + '" fill="#000"/></svg>';
   }
 
-  window.WCU = { server, startCamera, stopCamera, snapshot, countdown, flash, serverInfo, serverStatus, uploadBlob, viewerLink, renderQR };
+  window.WCU = { server, startCamera, stopCamera, snapshot, countdown, flash, serverInfo, serverStatus, sendCmd, clearPhotos, uploadBlob, viewerLink, renderQR };
 })();
