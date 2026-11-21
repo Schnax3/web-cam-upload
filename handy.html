@@ -18,14 +18,16 @@
   .flip { position: absolute; right: 1.5rem; bottom: calc(env(safe-area-inset-bottom) + 2rem); width: 3.4rem; height: 3.4rem; border-radius: 50%; padding: 0; font-size: 1.5rem; background: rgba(0,0,0,.5); }
   .toast { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 8rem); transform: translateX(-50%); max-width: 90%; }
 
-  #result { position: absolute; inset: 0; background: var(--bg); overflow-y: auto; padding: calc(env(safe-area-inset-top) + 1rem) 1.2rem 2rem; text-align: center; }
-  #result img { width: 100%; max-height: 30vh; object-fit: contain; border-radius: 14px; background: #000; }
-  #result .qr { width: min(80vw, 20rem); margin: 1rem auto; }
-  .spinner { width: 3rem; height: 3rem; border: 5px solid #2b3550; border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin: 2rem auto; }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  #noCode { position: absolute; inset: 0; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; padding: 2rem; text-align: center; }
+  #noCode p { color: var(--muted); max-width: 26rem; }
 </style>
 </head>
 <body>
+
+<div id="noCode" class="hidden">
+  <h1>📱 Handy als Kamera</h1>
+  <p>Diese Seite wird über den QR-Code auf der Laptop-Seite geöffnet (<b>laptop.html</b>). Bitte dort den QR-Code „Handy als Kamera nutzen“ scannen.</p>
+</div>
 
 <div id="camView">
   <video id="video" autoplay playsinline muted></video>
@@ -41,22 +43,7 @@
   </div>
 </div>
 
-<div id="result" class="hidden">
-  <img id="photo" alt="Dein Foto">
-  <div id="uploading"><div class="spinner"></div><p>Foto wird hochgeladen …</p></div>
-  <div id="uploaded" class="hidden">
-    <h2>📱 Scannen &amp; Foto holen</h2>
-    <div id="resultQr" class="qr"></div>
-  </div>
-  <div id="uploadError" class="error hidden"></div>
-  <p>
-    <button id="retryBtn" class="secondary hidden">Nochmal hochladen</button>
-    <button id="newBtn">Nächstes Foto</button>
-  </p>
-</div>
-
 <script src="config.js"></script>
-<script src="lib/qrcode.js"></script>
 <script src="lib/peerjs.min.js"></script>
 <script src="common.js"></script>
 <script>
@@ -65,13 +52,16 @@
   const CFG = window.CONFIG;
   document.title = CFG.TITLE + " – Handy";
 
-  // Code aus dem Link (…/handy.html#abc123) => Kopplung mit Laptop, sonst eigenständig
+  // Code aus dem Link (…/handy.html#abc123) = Kopplung mit dem Laptop
   const code = location.hash.replace("#", "").trim();
-  const paired = code.length > 0;
+  if (!code) {
+    $("camView").classList.add("hidden");
+    $("noCode").classList.remove("hidden");
+    return;
+  }
 
   let facing = "environment";
   let busy = false;
-  let lastBlob = null;
   let conn = null;
   let peer = null;
 
@@ -112,9 +102,10 @@
     try {
       await WCU.countdown($("count"), CFG.COUNTDOWN);
       WCU.flash($("flash"));
-      let blob = await WCU.snapshot($("video"));
-      if (paired) await sendToLaptop(blob);
-      else await showResult(blob);
+      const blob = await WCU.snapshot($("video"));
+      if (!conn || !conn.open) throw new Error("Nicht mit dem Laptop verbunden.");
+      conn.send({ kind: "photo", data: await blob.arrayBuffer() });
+      setMode("Gesendet …", "");
     } catch (e) {
       toast(e.message);
     } finally {
@@ -123,13 +114,7 @@
     }
   });
 
-  // ---------- Modus A: an Laptop schicken ----------
-  async function sendToLaptop(blob) {
-    if (!conn || !conn.open) throw new Error("Nicht mit dem Laptop verbunden.");
-    conn.send({ kind: "photo", data: await blob.arrayBuffer() });
-    setMode("Gesendet …", "");
-  }
-
+  // ---------- Verbindung zum Laptop (PeerJS / WebRTC) ----------
   function connectToLaptop() {
     setMode("Verbinde mit Laptop …", "");
     peer = new Peer();
@@ -155,44 +140,8 @@
     }, 3000);
   }
 
-  // ---------- Modus B: eigenständig, QR auf dem Handy ----------
-  async function showResult(blob) {
-    lastBlob = blob;
-    $("photo").src = URL.createObjectURL(blob);
-    $("camView").classList.add("hidden");
-    $("result").classList.remove("hidden");
-    await upload();
-  }
-
-  async function upload() {
-    $("uploading").classList.remove("hidden");
-    $("uploaded").classList.add("hidden");
-    $("uploadError").classList.add("hidden");
-    $("retryBtn").classList.add("hidden");
-    try {
-      const imageUrl = await WCU.uploadBlob(lastBlob);
-      WCU.renderQR($("resultQr"), WCU.viewerLink(imageUrl));
-      $("uploading").classList.add("hidden");
-      $("uploaded").classList.remove("hidden");
-    } catch (e) {
-      $("uploading").classList.add("hidden");
-      $("uploadError").textContent = e.message;
-      $("uploadError").classList.remove("hidden");
-      $("retryBtn").classList.remove("hidden");
-    }
-  }
-
-  $("retryBtn").addEventListener("click", upload);
-  $("newBtn").addEventListener("click", () => {
-    $("result").classList.add("hidden");
-    $("camView").classList.remove("hidden");
-    lastBlob = null;
-  });
-
-  // ---------- Start ----------
   initCamera();
-  if (paired) connectToLaptop();
-  else setMode("Eigenständig (QR hier am Handy)", "");
+  connectToLaptop();
 })();
 </script>
 </body>

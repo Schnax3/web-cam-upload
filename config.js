@@ -2,14 +2,13 @@
 //  EINSTELLUNGEN – hier einmal anpassen
 // ============================================================
 window.CONFIG = {
-  // Kostenloser API-Key von https://api.imgbb.com/  (Account anlegen -> "Get API key")
-  IMGBB_KEY: "HIER_IMGBB_KEY_EINTRAGEN",
+  // Adresse der GitHub-Pages-Seite (mit / am Ende). Dorthin führt der QR-Code.
+  PAGES_URL: "https://schnax3.github.io/web-cam-upload/",
 
-  // Wie lange das Bild online bleibt, dann löscht imgbb es automatisch.
-  // Erlaubt: 60 bis 15552000 Sekunden.  86400 = 24 Stunden, 3600 = 1 Stunde
-  EXPIRATION_SECONDS: 86400,
+  // Foto-Server (foto_server.py) auf dem Laptop
+  LOCAL_SERVER: "http://127.0.0.1:8765",
 
-  // Größte Kantenlänge des Fotos in Pixeln (kleiner = schnellerer Upload)
+  // Größte Kantenlänge des Fotos in Pixeln
   MAX_SIZE: 1600,
 
   // Countdown vor dem Foto in Sekunden (0 = sofort auslösen)

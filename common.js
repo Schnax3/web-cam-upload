@@ -1,11 +1,11 @@
-// Gemeinsame Funktionen für laptop.html, handy.html und foto.html
+// Gemeinsame Funktionen für laptop.html und handy.html
 (function () {
   const CFG = window.CONFIG;
   let currentStream = null;
 
-  // Ordner-URL, in dem die Seiten liegen (funktioniert auf GitHub Pages und lokal)
+  // Adresse der GitHub-Pages-Seite (mit / am Ende)
   function baseUrl() {
-    return location.origin + location.pathname.replace(/[^/]*$/, "");
+    return CFG.PAGES_URL;
   }
 
   async function startCamera(video, facing) {
@@ -37,7 +37,7 @@
     c.height = Math.round(h * scale);
     c.getContext("2d").drawImage(video, 0, 0, c.width, c.height);
     return new Promise((resolve, reject) =>
-      c.toBlob((b) => (b ? resolve(b) : reject(new Error("Foto konnte nicht erstellt werden."))), "image/jpeg", 0.85)
+      c.toBlob((b) => (b ? resolve(b) : reject(new Error("Foto konnte nicht erstellt werden."))), "image/jpeg", 0.88)
     );
   }
 
@@ -60,30 +60,43 @@
     el.classList.add("go");
   }
 
-  // Foto bei imgbb hochladen, gibt die direkte Bild-URL zurück
-  async function uploadBlob(blob) {
-    const key = CFG.IMGBB_KEY;
-    if (!key || key.indexOf("HIER_") === 0) {
-      throw new Error("Kein imgbb-API-Key in config.js eingetragen.");
-    }
-    const fd = new FormData();
-    fd.append("image", blob, "foto.jpg");
-    const url =
-      "https://api.imgbb.com/1/upload?expiration=" +
-      encodeURIComponent(CFG.EXPIRATION_SECONDS) +
-      "&key=" + encodeURIComponent(key);
-    const res = await fetch(url, { method: "POST", body: fd });
-    let json;
-    try { json = await res.json(); } catch (e) { throw new Error("Upload fehlgeschlagen (keine Antwort)."); }
-    if (!json.success) {
-      throw new Error((json.error && json.error.message) || "Upload fehlgeschlagen.");
-    }
-    return json.data.url;
+  // ---------- Foto-Server auf dem Laptop ----------
+  async function serverInfo() {
+    const r = await fetch(CFG.LOCAL_SERVER + "/info");
+    if (!r.ok) throw new Error("Server antwortet nicht richtig.");
+    return r.json();
   }
 
-  // Link, den der QR-Code enthält: unsere Foto-Seite mit der Bild-URL
-  function viewerLink(imageUrl) {
-    return baseUrl() + "foto.html?i=" + encodeURIComponent(imageUrl);
+  // Foto zum Laptop-Server hochladen. Gibt { token, publicUrl, ttl } zurück.
+  async function uploadBlob(blob) {
+    let info;
+    try {
+      info = await serverInfo();
+    } catch (e) {
+      throw new Error("Foto-Server auf dem Laptop nicht erreichbar. Läuft foto_server.py?");
+    }
+    if (!info.public_url) {
+      throw new Error("Der Server hat keine öffentliche Adresse (Cloudflare-Tunnel fehlt).");
+    }
+    let res;
+    try {
+      res = await fetch(CFG.LOCAL_SERVER + "/upload", {
+        method: "POST",
+        headers: { "Content-Type": "image/jpeg" },
+        body: blob,
+      });
+    } catch (e) {
+      throw new Error("Upload zum Foto-Server fehlgeschlagen.");
+    }
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json.token) throw new Error("Upload fehlgeschlagen: " + (json.error || res.status));
+    return { token: json.token, publicUrl: info.public_url, ttl: json.expires_in };
+  }
+
+  // Link im QR-Code: GitHub-Pages-Seite, Server-Adresse und Token stehen hinter dem #
+  // (der Teil nach # wird nie an einen Server geschickt)
+  function viewerLink(publicUrl, token) {
+    return baseUrl() + "foto.html#s=" + encodeURIComponent(publicUrl) + "&t=" + encodeURIComponent(token);
   }
 
   // QR-Code als SVG in ein Element zeichnen
@@ -106,5 +119,5 @@
       d + '" fill="#000"/></svg>';
   }
 
-  window.WCU = { baseUrl, startCamera, stopCamera, snapshot, countdown, flash, uploadBlob, viewerLink, renderQR };
+  window.WCU = { baseUrl, startCamera, stopCamera, snapshot, countdown, flash, serverInfo, uploadBlob, viewerLink, renderQR };
 })();

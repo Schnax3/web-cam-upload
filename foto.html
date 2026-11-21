@@ -3,67 +3,217 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
 <title>Dein Foto</title>
 <link rel="stylesheet" href="style.css">
 <style>
-  body { display: flex; flex-direction: column; align-items: center; padding: 1rem; gap: 1rem; text-align: center; }
-  img { width: 100%; max-width: 40rem; border-radius: 14px; background: #000; }
-  .hint { color: var(--muted); font-size: .9rem; max-width: 32rem; }
+  body { display: flex; flex-direction: column; align-items: center; padding: 1rem; gap: 1rem; text-align: center; min-height: 100%; }
+  h1 { margin: 0; font-size: 1.4rem; }
+  #stage { width: 100%; max-width: 44rem; display: flex; flex-direction: column; gap: 1rem; align-items: center; }
+  #main { width: 100%; height: auto; border-radius: 14px; background: #000; display: block; }
+  .filters { display: flex; gap: .6rem; overflow-x: auto; width: 100%; padding: .2rem .1rem .6rem; scroll-snap-type: x proximity; }
+  .filters button { flex: 0 0 auto; background: transparent; padding: 0; border-radius: 12px; border: 3px solid transparent; scroll-snap-align: start; color: var(--muted); font-size: .8rem; font-weight: 500; }
+  .filters button canvas { display: block; width: 5.2rem; height: 5.2rem; border-radius: 9px; }
+  .filters button span { display: block; padding: .25rem 0 .3rem; }
+  .filters button.active { border-color: var(--accent); color: var(--text); }
+  .actions { display: flex; gap: .7rem; flex-wrap: wrap; justify-content: center; }
+  .actions button { font-size: 1.1rem; }
+  .hint { color: var(--muted); font-size: .85rem; max-width: 32rem; margin: 0; }
+  .spinner { width: 3rem; height: 3rem; border: 5px solid #2b3550; border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin: 3rem auto; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
   <h1>📸 Dein Foto</h1>
+
+  <div id="loading"><div class="spinner"></div><p class="hint">Foto wird geladen …</p></div>
   <div id="error" class="error hidden"></div>
-  <img id="img" class="hidden" alt="Dein Foto">
-  <div id="actions" class="hidden">
-    <button id="saveBtn">Foto speichern</button>
+
+  <div id="stage" class="hidden">
+    <canvas id="main"></canvas>
+    <div id="filters" class="filters"></div>
+    <div class="actions">
+      <button id="saveBtn">⬇️ Herunterladen</button>
+      <button id="shareBtn" class="secondary hidden">📤 Teilen / Sichern</button>
+    </div>
+    <p class="hint">Das Foto wird nur für kurze Zeit gespeichert und danach automatisch gelöscht.</p>
   </div>
-  <p id="hint" class="hint hidden">Klappt der Button nicht: Bild lange drücken und „Zu Fotos hinzufügen“ bzw. „Bild speichern“ wählen.</p>
 
 <script>
 (function () {
+  "use strict";
   const $ = (id) => document.getElementById(id);
-  const raw = new URLSearchParams(location.search).get("i") || "";
 
-  // Nur Bilder von imgbb zulassen (verhindert, dass der Link auf fremde Seiten zeigt)
-  if (!/^https:\/\/i\.ibb\.co\/[A-Za-z0-9_\-\/.]+$/.test(raw)) {
-    $("error").textContent = "Kein gültiger Foto-Link. Bitte den QR-Code erneut scannen.";
+  // ---------- Filter ----------
+  // gray/sepia: 0..1 Anteil, sat/contrast/bright: Faktoren, tint: Farbfaktoren, vignette: 0..1
+  const FILTERS = [
+    { name: "Original" },
+    { name: "Schwarz-Weiß", gray: 1, contrast: 1.12 },
+    { name: "Sepia", sepia: 1, contrast: 1.05 },
+    { name: "Vintage", sepia: 0.35, contrast: 0.9, bright: 1.05, tint: [1.06, 1.0, 0.9], vignette: 0.45 },
+    { name: "Lebendig", sat: 1.55, contrast: 1.1 },
+    { name: "Warm", tint: [1.1, 1.02, 0.88], sat: 1.1 },
+    { name: "Kühl", tint: [0.9, 1.0, 1.12], sat: 1.05 },
+    { name: "Dramatisch", sat: 0.75, contrast: 1.4, bright: 0.95, vignette: 0.55 },
+    { name: "Pastell", bright: 1.12, contrast: 0.8, sat: 0.8 },
+  ];
+
+  // Pixel-Berechnung (läuft überall, auch auf iPhones ohne canvas-filter)
+  function applyFilter(imageData, f) {
+    const d = imageData.data, w = imageData.width, h = imageData.height;
+    const gray = f.gray || 0, sepia = f.sepia || 0, sat = f.sat == null ? 1 : f.sat;
+    const contrast = f.contrast == null ? 1 : f.contrast, bright = f.bright == null ? 1 : f.bright;
+    const tint = f.tint || [1, 1, 1], vig = f.vignette || 0;
+    const cx = w / 2, cy = h / 2, maxd = Math.hypot(cx, cy);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
+        let r = d[i], g = d[i + 1], b = d[i + 2];
+        if (sepia) {
+          const sr = 0.393 * r + 0.769 * g + 0.189 * b;
+          const sg = 0.349 * r + 0.686 * g + 0.168 * b;
+          const sb = 0.272 * r + 0.534 * g + 0.131 * b;
+          r += (sr - r) * sepia; g += (sg - g) * sepia; b += (sb - b) * sepia;
+        }
+        if (gray) {
+          const l = 0.299 * r + 0.587 * g + 0.114 * b;
+          r += (l - r) * gray; g += (l - g) * gray; b += (l - b) * gray;
+        }
+        if (sat !== 1) {
+          const l = 0.299 * r + 0.587 * g + 0.114 * b;
+          r = l + (r - l) * sat; g = l + (g - l) * sat; b = l + (b - l) * sat;
+        }
+        r = (r * bright * tint[0] - 128) * contrast + 128;
+        g = (g * bright * tint[1] - 128) * contrast + 128;
+        b = (b * bright * tint[2] - 128) * contrast + 128;
+        if (vig) {
+          const dist = Math.hypot(x - cx, y - cy) / maxd;
+          const k = 1 - vig * dist * dist;
+          r *= k; g *= k; b *= k;
+        }
+        d[i] = r; d[i + 1] = g; d[i + 2] = b; // Uint8ClampedArray begrenzt auf 0..255
+      }
+    }
+    return imageData;
+  }
+
+  // ---------- Foto laden ----------
+  function showError(msg) {
+    $("loading").classList.add("hidden");
+    $("stage").classList.add("hidden");
+    $("error").textContent = msg;
     $("error").classList.remove("hidden");
+  }
+
+  const params = new URLSearchParams(location.hash.replace(/^#/, ""));
+  const server = params.get("s") || "";
+  const token = params.get("t") || "";
+
+  let serverUrl;
+  try { serverUrl = new URL(server); } catch (e) { serverUrl = null; }
+  if (!serverUrl || serverUrl.protocol !== "https:" || !/^[A-Za-z0-9_-]{16,64}$/.test(token)) {
+    showError("Kein gültiger Foto-Link. Bitte den QR-Code erneut scannen.");
     return;
   }
 
-  const img = $("img");
-  img.onerror = () => {
-    img.classList.add("hidden");
-    $("actions").classList.add("hidden");
-    $("error").textContent = "Das Foto ist nicht mehr verfügbar (abgelaufen?).";
-    $("error").classList.remove("hidden");
-  };
-  img.onload = () => {
-    img.classList.remove("hidden");
-    $("actions").classList.remove("hidden");
-    $("hint").classList.remove("hidden");
-  };
-  img.src = raw;
+  let current = 0;
+  const orig = document.createElement("canvas");
+  const main = $("main");
 
-  // Bild vorab laden, damit "Speichern" sofort reagiert (wichtig für das Teilen-Menü am iPhone)
-  let blobPromise = fetch(raw).then((r) => r.blob()).catch(() => null);
-  const filename = "foto.jpg";
+  function render(idx) {
+    current = idx;
+    const ctx = main.getContext("2d");
+    ctx.drawImage(orig, 0, 0);
+    if (FILTERS[idx].name !== "Original") {
+      ctx.putImageData(applyFilter(ctx.getImageData(0, 0, main.width, main.height), FILTERS[idx]), 0, 0);
+    }
+    [...$("filters").children].forEach((b, i) => b.classList.toggle("active", i === idx));
+  }
+
+  function buildFilterStrip() {
+    // kleine quadratische Vorschau (Mitte des Fotos)
+    const t = 120;
+    const side = Math.min(orig.width, orig.height);
+    const small = document.createElement("canvas");
+    small.width = small.height = t;
+    small.getContext("2d").drawImage(orig, (orig.width - side) / 2, (orig.height - side) / 2, side, side, 0, 0, t, t);
+    FILTERS.forEach((f, i) => {
+      const btn = document.createElement("button");
+      const c = document.createElement("canvas");
+      c.width = c.height = t;
+      const cctx = c.getContext("2d");
+      cctx.drawImage(small, 0, 0);
+      if (f.name !== "Original") cctx.putImageData(applyFilter(cctx.getImageData(0, 0, t, t), f), 0, 0);
+      const label = document.createElement("span");
+      label.textContent = f.name;
+      btn.append(c, label);
+      btn.addEventListener("click", () => render(i));
+      $("filters").appendChild(btn);
+    });
+  }
+
+  async function load() {
+    let blob;
+    try {
+      const res = await fetch(serverUrl.origin + "/img/" + encodeURIComponent(token), {
+        headers: { "ngrok-skip-browser-warning": "1" },
+        cache: "no-store",
+      });
+      if (res.status === 404) return showError("Dieses Foto gibt es nicht mehr (abgelaufen oder gelöscht).");
+      if (!res.ok) return showError("Foto konnte nicht geladen werden (Fehler " + res.status + ").");
+      blob = await res.blob();
+    } catch (e) {
+      return showError("Der Foto-Server ist gerade nicht erreichbar. Bitte später noch einmal versuchen.");
+    }
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      orig.width = main.width = img.naturalWidth;
+      orig.height = main.height = img.naturalHeight;
+      orig.getContext("2d").drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      buildFilterStrip();
+      render(0);
+      $("loading").classList.add("hidden");
+      $("stage").classList.remove("hidden");
+    };
+    img.onerror = () => showError("Das Foto konnte nicht angezeigt werden.");
+    img.src = url;
+  }
+
+  // ---------- Herunterladen / Teilen ----------
+  function currentBlob() {
+    return new Promise((resolve) => main.toBlob(resolve, "image/jpeg", 0.92));
+  }
+  function fileName() {
+    return "foto-" + FILTERS[current].name.toLowerCase().replace(/[^a-z0-9]+/g, "-") + ".jpg";
+  }
 
   $("saveBtn").addEventListener("click", async () => {
-    const blob = await blobPromise;
-    if (!blob) { window.open(raw, "_blank"); return; }
-    const file = new File([blob], filename, { type: blob.type || "image/jpeg" });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file] }); return; } catch (e) { if (e.name === "AbortError") return; }
-    }
+    const blob = await currentBlob();
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = filename;
+    a.download = fileName();
     document.body.appendChild(a);
     a.click();
     a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
   });
+
+  // Teilen-Menü (am Handy: "Bild sichern" / direkt in Fotos)
+  try {
+    const probe = new File([new Blob(["x"], { type: "image/jpeg" })], "x.jpg", { type: "image/jpeg" });
+    if (navigator.canShare && navigator.canShare({ files: [probe] })) $("shareBtn").classList.remove("hidden");
+  } catch (e) {}
+
+  $("shareBtn").addEventListener("click", async () => {
+    const blob = await currentBlob();
+    const file = new File([blob], fileName(), { type: "image/jpeg" });
+    try { await navigator.share({ files: [file] }); } catch (e) { /* abgebrochen */ }
+  });
+
+  load();
 })();
 </script>
 </body>

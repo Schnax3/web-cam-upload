@@ -34,7 +34,10 @@
 <body>
 <header>
   <h1 id="title">Foto-Aktion</h1>
-  <span id="phoneStatus" class="status">Handy: nicht verbunden</span>
+  <span>
+    <span id="serverStatus" class="status">Server: prüfe …</span>
+    <span id="phoneStatus" class="status">Handy: nicht verbunden</span>
+  </span>
 </header>
 
 <main id="camView">
@@ -135,9 +138,9 @@
     $("uploadError").classList.add("hidden");
     $("retryBtn").classList.add("hidden");
     try {
-      const imageUrl = await WCU.uploadBlob(lastBlob);
-      WCU.renderQR($("resultQr"), WCU.viewerLink(imageUrl));
-      const h = CFG.EXPIRATION_SECONDS / 3600;
+      const up = await WCU.uploadBlob(lastBlob);
+      WCU.renderQR($("resultQr"), WCU.viewerLink(up.publicUrl, up.token));
+      const h = up.ttl / 3600;
       $("expiryNote").textContent = "Das Bild ist " + (h >= 1 ? Math.round(h) + " Std." : Math.round(h * 60) + " Min.") + " abrufbar.";
       $("uploading").classList.add("hidden");
       $("uploaded").classList.remove("hidden");
@@ -210,8 +213,22 @@
     });
   }
 
+  // ---------- Foto-Server prüfen ----------
+  async function checkServer() {
+    const el = $("serverStatus");
+    try {
+      const info = await WCU.serverInfo();
+      if (info.public_url) { el.textContent = "Server ✓"; el.className = "status ok"; }
+      else { el.textContent = "Server ohne Tunnel"; el.className = "status err"; }
+    } catch (e) {
+      el.textContent = "Server nicht erreichbar"; el.className = "status err";
+    }
+  }
+
   initCamera();
   startPeer();
+  checkServer();
+  setInterval(checkServer, 10000);
 })();
 </script>
 </body>
