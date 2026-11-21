@@ -15,6 +15,8 @@
   .bottom .status { background: rgba(0, 0, 0, .55); }
   #msg { position: absolute; inset: 0; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; padding: 2rem; text-align: center; }
   #msg p { color: var(--muted); max-width: 26rem; }
+  #rot { position: absolute; inset: 0; z-index: 5; background: rgba(0, 0, 0, .8); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5rem; text-align: center; font-size: 4rem; }
+  #rot p { font-size: 1.3rem; margin: 0; color: #fff; }
 </style>
 </head>
 <body>
@@ -23,6 +25,7 @@
 
 <video id="video" autoplay playsinline muted></video>
 <div id="flash" class="flash"></div>
+<div id="rot" class="hidden"><div>📱 ↻</div><p>Bitte das Handy quer halten</p></div>
 <div class="top"><span id="conn" class="status">Verbinde …</span></div>
 <div class="bottom"><span class="status">Externe Kamera – wird vom Laptop gesteuert</span> <span id="note" class="status hidden"></span></div>
 
@@ -73,7 +76,7 @@
   async function startCam() {
     if (stream) stream.getTracks().forEach((t) => t.stop());
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      video: { facingMode: { ideal: facing }, width: { ideal: 2560 }, height: { ideal: 1440 } },
       audio: false,
     });
     video.srcObject = stream;
@@ -139,6 +142,8 @@
       const t0 = performance.now();
       try {
         if (video.videoWidth) {
+          // Hinweis, solange das Handy hochkant gehalten wird (das Foto soll quer sein)
+          $("rot").classList.toggle("hidden", video.videoWidth >= video.videoHeight);
           const frame = await grab(640, 0.6);
           const r = await fetch("/phone/frame", {
             method: "POST",

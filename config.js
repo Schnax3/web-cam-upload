@@ -9,8 +9,9 @@ window.CONFIG = {
   // (Normalfall: Laptop-Seite läuft auf http://localhost:8765/).
   LOCAL_SERVER: "",
 
-  // Größte Kantenlänge des Fotos in Pixeln
-  MAX_SIZE: 1600,
+  // Größte Kantenlänge des Fotos in Pixeln. Hoch genug wählen, denn die Hochkant-Version
+  // ist ein Ausschnitt aus der Mitte (bei 2560 px: 9:16 = ca. 810 x 1440 px, 3:4 = ca. 1080 x 1440 px).
+  MAX_SIZE: 2560,
 
   // Countdown vor dem Foto der Laptop-Kamera in Sekunden (0 = sofort auslösen)
   COUNTDOWN: 3,
