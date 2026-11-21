@@ -107,14 +107,7 @@ class Handler(BaseHTTPRequestHandler):
         super().setup()
 
     def log_message(self, fmt, *args):
-        if not self.command:  # abgebrochene oder leere Verbindung
-            return
-        line = (self.requestline or "").split(" ")
-        path = line[1] if len(line) > 1 else ""
-        path = re.sub(r"/img/[^/?\s]+", "/img/…", path)
-        if path.startswith(("/status", "/phone/frame", "/stream")):
-            return  # Dauerverkehr nicht ausgeben
-        print(f"  {self.command} {path}")
+        return
 
     def kind(self):
         """'local' (Laptop selbst), 'lan' (Gerät im WLAN) oder 'remote' (Tunnel/Internet)."""
@@ -296,7 +289,6 @@ class Handler(BaseHTTPRequestHandler):
             if data is None:
                 return
             token = self.save_photo(data)
-            print("  Foto gespeichert (Laptop-Kamera)")
             return self.reply_json(200, {"token": token, "expires_in": State.ttl})
 
         if path == "/phone/frame":  # Livebild-Einzelbild vom Handy; Antwort enthält Befehle vom Laptop
@@ -306,14 +298,11 @@ class Handler(BaseHTTPRequestHandler):
             if data is None:
                 return
             with State.cond:
-                was = phone_connected()
                 State.phone_seen = time.time()
                 State.frame = data
                 State.frame_id += 1
                 cmds, State.cmds = State.cmds, []
                 State.cond.notify_all()
-            if not was:
-                print("  Handy verbunden")
             return self.reply_json(200, {"cmds": cmds})
 
         if path == "/phone/photo":  # Foto in voller Größe vom Handy
@@ -327,7 +316,6 @@ class Handler(BaseHTTPRequestHandler):
                 State.phone_seen = time.time()
                 State.seq += 1
                 State.last_token = token
-            print("  Foto gespeichert (Handy)")
             return self.reply_json(200, {"ok": True})
 
         if path == "/cmd":  # Befehl vom Laptop an das Handy
@@ -361,7 +349,6 @@ class Handler(BaseHTTPRequestHandler):
                         pass
             with State.cond:
                 State.last_token = None
-            print(f"  {n} Fotos gelöscht")
             return self.reply_json(200, {"deleted": n})
 
         return self.reply_json(404, {"error": "nicht gefunden"})
