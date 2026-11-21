@@ -2,7 +2,7 @@
 
 Foto-Aktion für den Aktionsstand: Foto aufnehmen → QR-Code erscheint → Besucher scannen ihn mit dem eigenen Handy und landen auf einer Seite mit **Vorschau, Filtern und Download-Button**.
 
-Die Fotos liegen **nur auf deinem Laptop** (kein Cloud-Bilderdienst). Abrufbar sind sie nur mit dem Token, der im QR-Code steht.
+**Alles läuft lokal auf deinem Laptop.** Nur das Abholen der Fotos geht über das Internet (GitHub-Pages-Seite + Tunnel). Die Fotos liegen ausschließlich auf dem Laptop und sind nur mit dem Token im QR-Code abrufbar.
 
 ## Inhalt
 
@@ -21,36 +21,32 @@ Die Fotos liegen **nur auf deinem Laptop** (kein Cloud-Bilderdienst). Abrufbar s
 ## Überblick
 
 ```
- Kamera (Laptop-Webcam oder gekoppeltes Handy)
-        │
-        ▼
- laptop.html  (GitHub Pages, im Browser des Laptops)
-        │  POST /upload  (nur lokal erlaubt)
-        ▼
- foto_server.py  (Python auf deinem Laptop, 127.0.0.1)
-        │  speichert photos/<Token>.jpg
-        │
-        │  Cloudflare-Tunnel  (https://irgendwas.trycloudflare.com)
-        │
- Besucher scannt QR ─► foto.html#s=<Tunnel-Adresse>&t=<Token>  (GitHub Pages)
-                            └─► holt GET /img/<Token> und zeigt Vorschau + Filter
+        ┌──────────────── lokal, auf dem Laptop und im WLAN ────────────────┐
+        │                                                                   │
+        │  Laptop-Browser: http://localhost:8765/   (Laptop-Kamera)         │
+        │  Handy im WLAN:  http://<Laptop-IP>:8765/handy.html#<Schlüssel>   │
+        │            └──────────► foto_server.py (Python) ◄───┘             │
+        │                          speichert photos/<Token>.jpg             │
+        └───────────────────────────────┬───────────────────────────────────┘
+                                        │ Cloudflare-Tunnel (https), nur GET /img/<Token>
+                                        ▼
+ Besucher scannt QR ─► foto.html#s=<Tunnel>&t=<Token>  (GitHub Pages) ─► Vorschau, Filter, Download
 ```
+
+**Handy hat Vorrang:** Solange kein Handy verbunden ist, benutzt die Laptop-Seite die Laptop-Kamera. Sobald du ein Handy koppelst (auch nachträglich), pausiert die Laptop-Kamera, die Laptop-Seite zeigt „Handy-Kamera aktiv“ und neue Fotos kommen vom Handy. Schließt du die Handy-Seite (oder das Handy verliert das WLAN), geht die Laptop-Kamera nach ca. 8 Sekunden von selbst wieder an.
 
 | Datei | Aufgabe |
 |---|---|
-| `foto_server.py` | Server auf dem Laptop. Speichert Fotos, gibt sie nur per Token heraus, löscht sie nach Ablauf, startet den Tunnel. Nur Python-Standardbibliothek, keine Pakete nötig. |
-| `laptop.html` | Seite für den Laptop: Webcam-Vorschau, Foto mit Countdown, QR-Code zum Abholen. Zeigt außerdem einen QR-Code, um ein Handy als Kamera zu koppeln. |
-| `handy.html` | Seite für das Handy als Kamera. Wird über den Kopplungs-QR der Laptop-Seite geöffnet und schickt das Foto direkt an den Laptop. |
-| `foto.html` | Seite, die Besucher nach dem Scannen sehen: Vorschau, 9 Filter, Herunterladen, Teilen. |
+| `foto_server.py` | Server auf dem Laptop. Liefert Laptop- und Handy-Seite aus, speichert Fotos, gibt sie nur per Token heraus, löscht sie nach Ablauf, startet den Tunnel. Nur Python-Standardbibliothek, keine Pakete nötig. |
+| `laptop.html` | Seite für den Laptop: Laptop-Kamera mit Countdown, Handy-Kopplung, QR-Code zum Abholen. |
+| `handy.html` | Seite für das Handy: Foto mit der Kamera-App aufnehmen, wird automatisch an den Laptop geschickt. |
+| `foto.html` | Seite für Besucher nach dem Scannen (läuft auf GitHub Pages): Vorschau, 9 Filter, Herunterladen, Teilen. |
 | `config.js` | Einstellungen (Seiten-Adresse, Countdown, Foto-Größe, Titel). |
 | `common.js`, `style.css` | Gemeinsamer Code und Aussehen. |
-| `lib/` | `peerjs.min.js` (Handy-Kopplung) und `qrcode.js` (QR-Erzeugung), lokal eingebunden, kein CDN nötig. |
-| `index.html` | Startseite mit Links zu Laptop- und Handy-Seite. |
+| `lib/qrcode.js` | QR-Erzeugung, lokal eingebunden, kein CDN nötig. |
+| `index.html` | Startseite mit Links (für GitHub Pages). |
 
-Es gibt zwei Wege, ein Foto aufzunehmen. Beide enden gleich (Foto landet auf dem Laptop-Server, QR-Code erscheint auf dem Laptop):
-
-- **Laptop-Webcam:** Auf der Laptop-Seite „Foto machen“ klicken.
-- **Handy als Kamera:** Handy scannt den Kopplungs-QR auf der Laptop-Seite, löst dort aus, das Foto erscheint auf dem Laptop.
+Es werden **keine externen Dienste** für Kamera, Kopplung oder Speicherung benutzt. Nur `foto.html` kommt von GitHub Pages und das Foto selbst läuft durch den Tunnel.
 
 ---
 
@@ -66,7 +62,7 @@ Nach ein bis zwei Minuten ist die Seite erreichbar unter:
 https://schnax3.github.io/web-cam-upload/
 ```
 
-Wenn dein Repo oder dein Benutzername anders heißt, die Adresse in `config.js` bei `PAGES_URL` anpassen (mit `/` am Ende) und den Server mit `--origin` starten (siehe unten).
+Sie wird nur für `foto.html` gebraucht (die Seite, die der QR-Code öffnet). Wenn dein Repo oder dein Benutzername anders heißt, die Adresse in `config.js` bei `PAGES_URL` anpassen (mit `/` am Ende) und den Server mit `--origin` starten (siehe unten).
 
 ### 2. Python
 
@@ -78,9 +74,9 @@ python --version
 
 (Unter Linux/macOS evtl. `python3`.) Es müssen keine Pakete installiert werden.
 
-### 3. cloudflared (der Tunnel)
+### 3. cloudflared (der Tunnel zum Abholen)
 
-Die Handys der Besucher müssen deinen Laptop aus dem Internet erreichen. Dafür nutzt das Skript einen kostenlosen Cloudflare-„Quick Tunnel“. Es ist **kein Account** nötig.
+Die Handys der Besucher müssen ihr Foto aus dem Internet vom Laptop holen können. Dafür nutzt das Skript einen kostenlosen Cloudflare-„Quick Tunnel“. Es ist **kein Account** nötig.
 
 | System | Installation |
 |---|---|
@@ -94,7 +90,11 @@ Danach **neues Terminal öffnen** und prüfen:
 cloudflared --version
 ```
 
-Du kannst stattdessen auch einen eigenen Tunnel verwenden (Tailscale Funnel, ngrok, eigener Cloudflare-Tunnel mit fester Adresse). Dann den Server mit `--public-url https://deine-adresse` starten.
+Statt Cloudflare geht auch ein eigener Tunnel (Tailscale Funnel, ngrok, eigener Cloudflare-Tunnel mit fester Adresse): Server mit `--public-url https://deine-adresse` starten.
+
+### 4. Windows-Firewall (nur beim ersten Start)
+
+Windows fragt beim ersten Start, ob Python im Netzwerk kommunizieren darf. **Zugriff in privaten Netzwerken erlauben.** Ohne das kann das Handy den Laptop im WLAN nicht erreichen.
 
 ---
 
@@ -108,49 +108,48 @@ Im Projektordner:
 python foto_server.py
 ```
 
-Das Skript
-
-1. startet den Server auf `127.0.0.1:8765`,
-2. startet den Tunnel und wartet, bis die Adresse da ist,
-3. gibt die Adressen aus, z. B.:
+Das Skript startet den Server, startet den Tunnel und gibt die Adressen aus, z. B.:
 
 ```
-Foto-Server läuft auf http://127.0.0.1:8765  (Fotos werden nach 24 h gelöscht)
+Foto-Server läuft (Fotos werden nach 24 h gelöscht)
 Starte Cloudflare-Tunnel …
-Öffentliche Adresse (nur per QR-Token abrufbar): https://xyz-abc.trycloudflare.com
 
-Laptop-Seite:  https://schnax3.github.io/web-cam-upload/laptop.html
-oder lokal:    http://localhost:8765/   (falls der Browser die erste nicht erlaubt)
+Laptop-Seite:  http://localhost:8765/
+Handy-Seite:   http://192.168.1.23:8765/handy.html#k3Jd8sLq0xw   (Handy im selben WLAN; auf der Laptop-Seite steht ein QR dafür)
+Abhol-Adresse (nur per Token): https://xyz-abc.trycloudflare.com
 ```
 
 Das Terminal-Fenster muss während der ganzen Aktion offen bleiben.
 
 ### Laptop-Seite öffnen
 
-`https://schnax3.github.io/web-cam-upload/laptop.html` im Browser öffnen und die Kamera erlauben. Oben rechts zeigt die Seite zwei Anzeigen:
+Im Browser des Laptops **`http://localhost:8765/`** öffnen und die Kamera erlauben. (Nicht die GitHub-Pages-Adresse: Die Laptop-Seite läuft lokal.) Oben rechts zeigt die Seite zwei Anzeigen:
 
 | Anzeige | Bedeutung |
 |---|---|
 | **Server ✓** (grün) | Foto-Server und Tunnel laufen. Alles gut. |
-| **Server nicht erreichbar** (rot) | `foto_server.py` läuft nicht oder der Browser blockiert den Zugriff. Siehe [Probleme](#probleme-und-lösungen). |
-| **Server ohne Tunnel** (rot) | Server läuft, aber es gibt keine öffentliche Adresse (cloudflared fehlt oder `--no-tunnel`). |
-| **Handy verbunden ✓** | Mindestens ein Handy ist als Kamera gekoppelt. |
+| **Server nicht erreichbar** (rot) | `foto_server.py` läuft nicht. |
+| **Server ohne Tunnel** (rot) | Server läuft, aber es gibt keine Abhol-Adresse (cloudflared fehlt oder `--no-tunnel`). |
+| **Handy verbunden ✓** (grün) | Ein Handy ist gekoppelt. Die Handy-Kamera hat Vorrang. |
 
-### Foto per Laptop-Webcam
+### Foto mit der Laptop-Kamera
 
 1. **📸 Foto machen** klicken.
-2. Countdown 3-2-1, Blitz, Foto wird hochgeladen.
+2. Countdown 3-2-1, Blitz, das Foto wird gespeichert.
 3. Es erscheint ein großer QR-Code. Der Besucher scannt ihn mit der Handy-Kamera.
 4. **Nächstes Foto** klicken für die nächste Person.
 
-### Foto per Handy
+### Handy hinzufügen (jederzeit)
 
-1. Auf der Laptop-Seite rechts den Kasten **„Handy als Kamera nutzen“** mit dem QR-Code zeigen.
-2. Mit dem Handy scannen, Kamera erlauben. Oben links muss **„Mit Laptop verbunden ✓“** stehen.
-3. Am Handy den runden Auslöser drücken (🔄 wechselt zwischen Front- und Rückkamera).
-4. Das Foto erscheint am Laptop samt QR-Code. Das Handy zeigt „Foto angekommen ✓“ und ist sofort für das nächste Foto bereit.
+1. Handy ins **selbe WLAN** wie der Laptop.
+2. Rechts auf der Laptop-Seite im Kasten **„Handy koppeln“** den QR-Code mit dem Handy scannen.
+3. Auf dem Handy steht oben **„Mit Laptop verbunden ✓“**. Gleichzeitig wechselt die Laptop-Seite auf **„Handy-Kamera aktiv“**, die Laptop-Kamera wird ausgeschaltet.
+4. Am Handy **📷 Foto aufnehmen** (hintere Kamera) oder **🤳 Selfie** (vordere Kamera) tippen. Es öffnet sich die Kamera-App des Handys. Nach dem Foto wird es automatisch gesendet.
+5. Das Foto erscheint am Laptop samt QR-Code zum Abholen. Das Handy zeigt „Foto angekommen ✓“ und ist sofort bereit für das nächste.
 
-Die Kopplung bleibt erhalten, auch wenn die Laptop-Seite neu geladen wird (der Code wird im Browser des Laptops gespeichert). Bricht die Verbindung ab, versucht das Handy sich alle 3 Sekunden neu zu verbinden.
+Zurück zur Laptop-Kamera: Handy-Seite schließen. Nach ca. 8 Sekunden schaltet die Laptop-Seite wieder auf die Laptop-Kamera.
+
+Die Kopplung bleibt gültig, auch nach Neustart des Servers (der Schlüssel steht in der Datei `.pairkey`), solange sich die WLAN-Adresse des Laptops nicht ändert. Das Handy kann denselben QR/Link also weiterverwenden. Bei einer neuen Adresse den QR neu scannen.
 
 ### Was der Besucher sieht
 
@@ -163,7 +162,7 @@ Nach dem Scannen öffnet sich `foto.html`:
 
 ### Beenden
 
-Im Terminal **Strg+C**. Der Tunnel wird mitbeendet. Die Fotos im Ordner `photos/` bleiben liegen. Wer alles sofort löschen will, löscht den Ordner `photos/` (bei laufendem Server ist das ebenfalls in Ordnung).
+Im Terminal **Strg+C**. Der Tunnel wird mitbeendet. Die Fotos im Ordner `photos/` bleiben liegen und werden beim nächsten Start nach Ablauf der Zeit gelöscht. Wer alles sofort löschen will, löscht den Ordner `photos/`.
 
 ---
 
@@ -173,66 +172,78 @@ Im Terminal **Strg+C**. Der Tunnel wird mitbeendet. Die Fotos im Ordner `photos/
 
 | Eintrag | Standard | Bedeutung |
 |---|---|---|
-| `PAGES_URL` | `https://schnax3.github.io/web-cam-upload/` | Adresse der GitHub-Pages-Seite. Dorthin führen die QR-Codes. Mit `/` am Ende. |
-| `LOCAL_SERVER` | `http://127.0.0.1:8765` | Adresse des Foto-Servers auf dem Laptop. Nur ändern, wenn du `--port` änderst. |
+| `PAGES_URL` | `https://schnax3.github.io/web-cam-upload/` | Adresse der GitHub-Pages-Seite. Dorthin führt der QR-Code zum Abholen. Mit `/` am Ende. |
+| `LOCAL_SERVER` | leer | Adresse des Foto-Servers. Leer = derselbe Server, von dem die Seite kommt. Normalerweise nie ändern. |
 | `MAX_SIZE` | `1600` | Längste Kante des Fotos in Pixeln. Größer = schärfer, aber größere Dateien. |
-| `COUNTDOWN` | `3` | Sekunden bis zum Auslösen. `0` = sofort. |
+| `COUNTDOWN` | `3` | Sekunden bis zum Auslösen der Laptop-Kamera. `0` = sofort. |
 | `TITLE` | `Foto-Aktion` | Titel oben auf der Laptop-Seite. |
 
-Änderungen an `config.js` müssen nach GitHub gepusht werden, damit sie auf der Pages-Seite ankommen. Zum schnellen Testen kannst du die Laptop-Seite lokal vom Server laden (`http://localhost:8765/`), dann wirken Änderungen sofort.
+Die Laptop- und Handy-Seite kommen direkt vom Server, Änderungen an `config.js` wirken dort sofort nach Neuladen. `foto.html` auf GitHub Pages liest `config.js` nicht, dort ist nichts zu pushen.
 
 ### `foto_server.py`
 
 | Option | Standard | Bedeutung |
 |---|---|---|
 | `--ttl 2` | `24` | Stunden, nach denen Fotos gelöscht werden. Bruchteile gehen auch (`--ttl 0.5`). |
-| `--port 8766` | `8765` | Port des Servers. Dann auch `LOCAL_SERVER` in `config.js` anpassen. |
-| `--origin https://...` | `https://schnax3.github.io` | Adresse der Pages-Seite (nur Protokoll + Domain, ohne Pfad). Nur diese Seite darf mit dem Server sprechen. |
+| `--port 8766` | `8765` | Port des Servers. |
+| `--origin https://...` | `https://schnax3.github.io` | Adresse der Pages-Seite (nur Protokoll + Domain, ohne Pfad). Nur diese Seite darf Fotos im Browser abrufen. |
 | `--public-url https://...` | Cloudflare-Tunnel | Eigene öffentliche https-Adresse statt Cloudflare-Tunnel. |
 | `--no-tunnel` | aus | Keinen Tunnel starten (zum Testen). |
+| `--no-lan` | aus | Nur der Laptop selbst darf zugreifen, kein Handy im WLAN. |
+| `--lan-ip 192.168.1.23` | automatisch | WLAN-Adresse des Laptops, falls die automatische Erkennung die falsche nimmt (z. B. bei VPN oder mehreren Netzwerkkarten). |
+| `--key abc123` | zufällig | Eigener Kopplungsschlüssel (6–64 Zeichen: Buchstaben, Ziffern, `_`, `-`). Standard: zufällig erzeugt und in `.pairkey` gespeichert. Datei löschen = neuer Schlüssel. |
 
 Beispiele:
 
 ```
 python foto_server.py --ttl 2
+python foto_server.py --lan-ip 192.168.178.20
 python foto_server.py --public-url https://laptop.mein-tailnet.ts.net
-python foto_server.py --no-tunnel
+python foto_server.py --no-tunnel --no-lan
 ```
 
 ---
 
 ## Sicherheit und Datenschutz
 
+### Wer darf was?
+
+Der Server prüft bei **jeder** Anfrage, woher sie kommt:
+
+| Herkunft | Erkennung | Erlaubt |
+|---|---|---|
+| **Laptop selbst** | Loopback-Adresse, kein Tunnel-Header | Alles (Laptop-Seite, Foto hochladen, Status). |
+| **Handy im WLAN** | private Adresse, kein Tunnel-Header | Nur `handy.html` (samt `style.css`, `config.js`), „Lebenszeichen“ und Foto senden, **und nur mit dem Kopplungsschlüssel**. |
+| **Internet (Tunnel)** | Tunnel-Header (`Cf-Ray`, `X-Forwarded-For`, …) | Nur `GET /img/<Token>`. Alles andere: 403/404. |
+
+Weitere Schutzmaßnahmen:
+
+- Der **Schlüssel** für das Handy ist zufällig (ca. 72 Bit). Jemand anderes im selben WLAN, der die Handy-Adresse ohne Schlüssel aufruft, kann nichts senden.
+- Der `Host`-Header muss `localhost` bzw. eine IP-Adresse sein (Schutz vor DNS-Rebinding), und ein Browser-`Origin` muss zur Seite passen (fremde Webseiten können nichts einschleusen).
+- Es werden nur JPEG-Dateien bis 12 MB angenommen.
+- Über den Tunnel ist **nichts außer den Fotos** erreichbar: Weder `laptop.html` noch `foto_server.py` noch der Ordner `photos/` lassen sich von außen laden.
+
 ### Wer kann Fotos sehen?
 
-- Jedes Foto bekommt beim Speichern einen zufälligen Token (128 Bit, mit `secrets.token_urlsafe`). Der ist nicht erratbar.
+- Jedes Foto bekommt beim Speichern einen zufälligen Token (128 Bit, `secrets.token_urlsafe`). Der ist nicht erratbar.
 - Der Token steht nur im QR-Code, im `#`-Teil des Links. Dieser Teil wird vom Browser nie an einen Server geschickt, taucht also in keinen Zugriffsprotokollen auf.
-- Nach außen gibt es **nur** `GET /img/<Token>`. Es gibt keine Liste, keinen Ordnerinhalt, keine Suche. Falscher Token = 404.
+- Es gibt keine Liste, keinen Ordnerinhalt, keine Suche. Falscher Token = 404.
 - Wer den QR-Code fotografiert oder den Link weitergibt, kann das Foto bis zum Ablauf sehen. Das ist bei „nur mit QR-Code“ nicht vermeidbar.
-
-### Wer kann Fotos hochladen oder den Server steuern?
-
-Nur die Seite auf dem Laptop selbst. Der Server lehnt `/upload` und `/info` ab, wenn
-
-- ein Tunnel-/Proxy-Header gesetzt ist (die Anfrage kommt also von außen),
-- die Anfrage nicht von `127.0.0.1` kommt,
-- der `Host`-Header nicht `127.0.0.1:<Port>` oder `localhost:<Port>` ist (Schutz vor DNS-Rebinding),
-- der `Origin` nicht deine Pages-Seite oder localhost ist (Schutz vor fremden Webseiten, die im Browser des Laptops Fotos einschleusen wollen).
-
-Zusätzlich werden nur JPEG-Dateien bis 12 MB angenommen. Der Server hört nur auf `127.0.0.1`, ist also im WLAN nicht direkt erreichbar, nur über den Tunnel und dort nur für `GET /img/<Token>`.
 
 ### Welche Dienste sind beteiligt?
 
 | Dienst | Was er sieht |
 |---|---|
-| **GitHub Pages** | Liefert nur die Webseiten (Code). Fotos laufen nie darüber. |
+| **GitHub Pages** | Liefert nur `foto.html` und die zugehörige Seite (Code). Fotos laufen nie darüber. |
 | **Cloudflare (Tunnel)** | Leitet die Abrufe der Fotos durch. Technisch sieht Cloudflare den Datenverkehr, wie bei jedem Tunnel/Proxy. |
-| **PeerJS-Server** (`0.peerjs.com`) | Vermittelt nur den Verbindungsaufbau zwischen Handy und Laptop (kurze zufällige IDs). Das Foto selbst geht direkt per WebRTC von Handy zu Laptop. |
+
+Kamera, Kopplung und Speicherung laufen komplett im lokalen Netz. Es gibt keinen Vermittlungsserver mehr.
 
 ### Hinweise für den Stand
 
 - Es werden Fotos von Personen gemacht. Ein gut sichtbares Schild hilft: „Foto wird bis zu 24 Stunden auf dem Laptop gespeichert und danach gelöscht; nur mit dem QR-Code abrufbar.“ Bei Minderjährigen vorher klären, ob das für eure Veranstaltung eine Einwilligung der Eltern braucht.
 - Nach der Aktion `photos/` löschen oder `--ttl` kurz wählen.
+- Das WLAN sollte nicht für Fremde offen sein (die Handy-Seite ist im ganzen WLAN erreichbar, durch den Schlüssel aber nur für das gekoppelte Handy nutzbar). Am besten Handy-Hotspot oder eigenes WLAN für den Stand.
 - Der Laptop sollte während der Aktion nicht in den Ruhezustand gehen (Energieeinstellungen).
 
 ---
@@ -241,23 +252,29 @@ Zusätzlich werden nur JPEG-Dateien bis 12 MB angenommen. Der Server hört nur a
 
 **Laptop-Seite zeigt „Server nicht erreichbar“**
 - Läuft `python foto_server.py` noch? Das Terminal-Fenster darf nicht geschlossen sein.
-- Chrome/Edge fragen beim ersten Mal evtl., ob die Seite auf Geräte im lokalen Netzwerk zugreifen darf: **Erlauben**. Wurde es abgelehnt: Schloss-Symbol in der Adresszeile → Website-Einstellungen → Zugriff auf lokale Geräte erlauben.
-- Safari und manche Browser (z. B. Brave mit Shields) blocken Zugriffe von einer https-Seite auf `http://127.0.0.1`. Dann die Laptop-Seite **direkt vom Server** öffnen: `http://localhost:8765/`. Das geht in der Regel auch für die Kamera, weil `localhost` als sicher gilt.
-- Port belegt? Mit `--port 8766` starten und `LOCAL_SERVER` in `config.js` anpassen (oder lokal über `http://localhost:8766/`).
+- Die Seite muss unter `http://localhost:8765/` geöffnet sein, nicht unter der GitHub-Pages-Adresse.
+- Port belegt? Mit `--port 8766` starten und `http://localhost:8766/` öffnen.
+
+**Handy zeigt „Keine Verbindung zum Laptop“ oder die Seite lädt gar nicht**
+- Handy und Laptop müssen im **selben WLAN** sein (nicht Mobilfunk, nicht Gast-WLAN mit Geräteisolation). Manche öffentlichen/Schul-WLANs trennen Geräte voneinander: dann Handy-Hotspot für beide nutzen (Laptop ins Hotspot-WLAN).
+- Windows-Firewall: Python für **private Netzwerke** erlauben (Einstellungen → Firewall → App zulassen).
+- Falsche Adresse im QR (z. B. VPN-Adapter)? Server mit `--lan-ip <richtige WLAN-IP>` starten. Die IP des Laptops zeigt `ipconfig` (Windows) bzw. `ip a` (Linux).
+- „Schlüssel falsch – QR neu scannen“: QR auf der Laptop-Seite erneut scannen (der Schlüssel wurde geändert, z. B. wegen gelöschter `.pairkey`).
+
+**Handy hat Vorrang, aber ich will die Laptop-Kamera**
+- Handy-Seite schließen. Nach ca. 8 Sekunden ist wieder die Laptop-Kamera aktiv.
+
+**Laptop-Seite bleibt auf „Handy-Kamera aktiv“, obwohl das Handy weg ist**
+- Das Handy sendet nur, solange die Seite offen und der Bildschirm an ist. Sperrt das Handy den Bildschirm, bricht die Verbindung nach 8 Sekunden ab und die Laptop-Kamera übernimmt. Beim Entsperren verbindet sich das Handy von selbst wieder.
 
 **„Server ohne Tunnel“ / „cloudflared ist nicht installiert“**
 - cloudflared installieren (siehe oben), **neues Terminal öffnen**, `cloudflared --version` prüfen.
 - Oder `--public-url` mit einem eigenen Tunnel angeben.
 - Firmen- oder Schulnetz kann Tunnel blockieren. Dann Handy-Hotspot für den Laptop nutzen.
 
-**Kamera zeigt schwarzes Bild oder Fehlermeldung**
+**Laptop-Kamera zeigt schwarzes Bild oder Fehlermeldung**
 - Kamera-Zugriff im Browser erlauben (Schloss-Symbol in der Adresszeile).
 - Wird die Kamera von einem anderen Programm benutzt (Teams, Zoom, OBS)? Dort beenden.
-- Auf dem Handy die Seite nicht in einer In-App-Ansicht öffnen (z. B. Scanner-App mit eingebautem Browser), sondern in Safari/Chrome.
-
-**Handy verbindet sich nicht („Laptop nicht gefunden …“)**
-- Die Laptop-Seite muss geöffnet sein. Wurde sie in einem anderen Browser oder Profil geöffnet oder der Browserspeicher gelöscht, gibt es einen neuen Code. Dann den Kopplungs-QR neu scannen.
-- Kommt trotzdem keine Verbindung zustande, ist meist ein strenges Netz schuld (Mobilfunk mit CGNAT, Firmen-WLAN). Handy und Laptop ins **gleiche WLAN** bringen. Für diese Verbindung gibt es keinen TURN-Server.
 
 **Foto-Seite meldet „Dieses Foto gibt es nicht mehr“**
 - Abgelaufen (`--ttl`) oder `photos/` wurde gelöscht.
@@ -275,7 +292,11 @@ Zusätzlich werden nur JPEG-Dateien bis 12 MB angenommen. Der Server hört nur a
 
 ## Technik im Detail
 
-### Der Link im QR-Code
+### Warum öffnet das Handy die Kamera-App statt einer Live-Vorschau?
+
+Browser erlauben den Live-Zugriff auf die Kamera nur über https oder `localhost`. Die Handy-Seite läuft aber über `http://<Laptop-IP>` im lokalen Netz (ohne Zertifikat, ohne Warnmeldungen). Deshalb nutzt sie das `capture`-Feld: Das öffnet die Kamera-App des Handys, die ohnehin die bessere Qualität hat. Das Foto wird danach auf `MAX_SIZE` verkleinert und gesendet.
+
+### Der Link im QR-Code zum Abholen
 
 ```
 https://schnax3.github.io/web-cam-upload/foto.html#s=<Tunnel-Adresse>&t=<Token>
@@ -291,16 +312,15 @@ Die Filter rechnen jeden Pixel selbst (Sepia, Graustufen, Sättigung, Kontrast, 
 
 | Anfrage | Wer darf | Zweck |
 |---|---|---|
-| `GET /info` | nur lokal | Liefert `public_url` und `ttl`. Die Laptop-Seite prüft damit, ob alles läuft. |
-| `POST /upload` | nur lokal | Nimmt ein JPEG entgegen, gibt `{token, expires_in}` zurück. |
+| `GET /info` | Laptop | `public_url`, `ttl`, Handy-Link (`lan_url`). |
+| `GET /status` | Laptop | `phone` (Handy verbunden?), `seq` (Zähler der Handy-Fotos), `token` (letztes Handy-Foto). Die Laptop-Seite fragt das jede Sekunde ab. |
+| `POST /upload` | Laptop | Foto der Laptop-Kamera (JPEG) speichern, gibt `{token, expires_in}` zurück. |
+| `POST /phone/hello` | Handy/Laptop + Schlüssel | Lebenszeichen des Handys alle 3 s. Nach 8 s ohne Lebenszeichen gilt das Handy als getrennt. |
+| `POST /phone/photo` | Handy/Laptop + Schlüssel | Foto vom Handy (JPEG) speichern, erhöht `seq`. |
 | `GET /img/<Token>` | jeder mit Token | Liefert das Foto. |
-| `GET /`, `/laptop.html`, `/*.js`, `/*.css` | nur lokal | Notlösung: Seiten direkt vom Server öffnen. Nur `.html`, `.css`, `.js` im Projektordner, nie `.py` oder Fotos. |
+| `GET /`, `*.html`, `*.js`, `*.css` | Laptop alles, Handy nur `handy.html`, `style.css`, `config.js` | Seiten ausliefern. Nur diese Dateitypen im Projektordner, nie `.py` oder Fotos. |
 
-Fotos liegen als `photos/<Token>.jpg`. Ein Hintergrund-Thread löscht jede Minute alles, was älter als `--ttl` ist. Der Ordner steht in `.gitignore` und wird nie committet. In der Server-Ausgabe erscheinen Tokens nicht.
-
-### Handy-Kopplung
-
-Die Laptop-Seite erzeugt einen 6-stelligen Code (z. B. `k7m2xq`) und meldet sich damit als `wcu-k7m2xq` beim PeerJS-Vermittlungsserver an. Der Kopplungs-QR enthält `…/handy.html#k7m2xq`. Das Handy verbindet sich direkt per WebRTC, schickt das Foto als Binärdaten und bekommt eine Empfangsbestätigung. Der Code wird im `localStorage` des Laptop-Browsers gespeichert, damit ein Neuladen die Kopplung nicht zerstört.
+Fotos liegen als `photos/<Token>.jpg`. Ein Hintergrund-Thread löscht jede Minute alles, was älter als `--ttl` ist. Der Ordner und `.pairkey` stehen in `.gitignore`. In der Server-Ausgabe erscheinen Tokens nicht.
 
 ---
 
@@ -309,21 +329,22 @@ Die Laptop-Seite erzeugt einen 6-stelligen Code (z. B. `k7m2xq`) und meldet sich
 Am besten am Vortag mit dem echten Laptop, dem echten WLAN und einem fremden Handy:
 
 - [ ] GitHub Pages ist an, `https://schnax3.github.io/web-cam-upload/` öffnet sich
-- [ ] `python foto_server.py` zeigt eine `trycloudflare.com`-Adresse
-- [ ] Laptop-Seite: **Server ✓** grün
-- [ ] Foto mit Laptop-Webcam, QR erscheint
+- [ ] `python foto_server.py` zeigt eine `trycloudflare.com`-Adresse und eine Handy-Adresse mit der richtigen WLAN-IP
+- [ ] `http://localhost:8765/`: **Server ✓** grün, Laptop-Kamera läuft
+- [ ] Foto mit der Laptop-Kamera, QR erscheint
 - [ ] QR mit einem fremden Handy **im Mobilfunk** (WLAN aus) scannen, Foto lädt
 - [ ] Filter wechseln, Herunterladen funktioniert, Datei ist in der Foto-App/Downloads
-- [ ] Handy als Kamera koppeln, Foto aufnehmen, erscheint am Laptop
-- [ ] Laptop-Seite neu laden: Handy-Kopplung funktioniert weiter
+- [ ] Eigenes Handy im WLAN koppeln: Laptop-Seite wechselt auf „Handy-Kamera aktiv“, Laptop-Kamera geht aus
+- [ ] Foto am Handy aufnehmen, es erscheint am Laptop mit QR-Code
+- [ ] Handy-Seite schließen: nach ca. 8 s ist wieder die Laptop-Kamera aktiv
 - [ ] Server beenden und neu starten: neues Foto geht, altes sagt sauber „nicht erreichbar“
-- [ ] Laptop-Ruhezustand ist aus, Netzteil steckt
+- [ ] Windows-Firewall erlaubt Python im privaten Netzwerk, Laptop-Ruhezustand ist aus, Netzteil steckt
 
 ---
 
 ## Anpassen
 
-- **Filter ändern oder ergänzen:** In `foto.html` die Liste `FILTERS` bearbeiten. Jeder Eintrag hat einen Namen und beliebige der Werte `gray`, `sepia` (0 bis 1), `sat`, `contrast`, `bright` (Faktoren, 1 = unverändert), `tint` (Faktoren für Rot, Grün, Blau) und `vignette` (0 bis 1).
+- **Filter ändern oder ergänzen:** In `foto.html` die Liste `FILTERS` bearbeiten. Jeder Eintrag hat einen Namen und beliebige der Werte `gray`, `sepia` (0 bis 1), `sat`, `contrast`, `bright` (Faktoren, 1 = unverändert), `tint` (Faktoren für Rot, Grün, Blau) und `vignette` (0 bis 1). Änderungen an `foto.html` müssen nach GitHub gepusht werden.
 - **Aussehen:** Farben stehen oben in `style.css` unter `:root`.
 - **Titel, Countdown, Foto-Größe:** `config.js`.
 - **Eigene Adresse der Seite (z. B. eigene Domain):** `PAGES_URL` in `config.js` und `--origin` beim Server setzen.

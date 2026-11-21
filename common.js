@@ -1,16 +1,16 @@
-// Gemeinsame Funktionen für laptop.html und handy.html
+// Gemeinsame Funktionen für die Laptop-Seite (laptop.html)
 (function () {
   const CFG = window.CONFIG;
   let currentStream = null;
 
-  // Adresse der GitHub-Pages-Seite (mit / am Ende)
-  function baseUrl() {
-    return CFG.PAGES_URL;
+  // Adresse des Foto-Servers (leer = gleicher Server wie die Seite)
+  function server() {
+    return CFG.LOCAL_SERVER || location.origin;
   }
 
   async function startCamera(video, facing) {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      throw new Error("Kamera nicht verfügbar. Die Seite muss über https geöffnet werden.");
+      throw new Error("Kamera nicht verfügbar. Die Seite bitte über http://localhost:8765/ öffnen.");
     }
     stopCamera();
     const constraints = {
@@ -60,27 +60,29 @@
     el.classList.add("go");
   }
 
-  // ---------- Foto-Server auf dem Laptop ----------
-  async function serverInfo() {
-    const r = await fetch(CFG.LOCAL_SERVER + "/info");
-    if (!r.ok) throw new Error("Server antwortet nicht richtig.");
+  // ---------- Foto-Server ----------
+  async function getJson(path) {
+    const r = await fetch(server() + path, { cache: "no-store" });
+    if (!r.ok) throw new Error("Server antwortet nicht richtig (" + r.status + ").");
     return r.json();
   }
+  const serverInfo = () => getJson("/info");   // { public_url, ttl, lan_url }
+  const serverStatus = () => getJson("/status"); // { phone, seq, token }
 
-  // Foto zum Laptop-Server hochladen. Gibt { token, publicUrl, ttl } zurück.
+  // Foto der Laptop-Kamera zum Server schicken. Gibt { token, publicUrl, ttl } zurück.
   async function uploadBlob(blob) {
     let info;
     try {
       info = await serverInfo();
     } catch (e) {
-      throw new Error("Foto-Server auf dem Laptop nicht erreichbar. Läuft foto_server.py?");
+      throw new Error("Foto-Server nicht erreichbar. Läuft foto_server.py?");
     }
     if (!info.public_url) {
-      throw new Error("Der Server hat keine öffentliche Adresse (Cloudflare-Tunnel fehlt).");
+      throw new Error("Der Server hat keine Abhol-Adresse (Cloudflare-Tunnel fehlt).");
     }
     let res;
     try {
-      res = await fetch(CFG.LOCAL_SERVER + "/upload", {
+      res = await fetch(server() + "/upload", {
         method: "POST",
         headers: { "Content-Type": "image/jpeg" },
         body: blob,
@@ -93,10 +95,10 @@
     return { token: json.token, publicUrl: info.public_url, ttl: json.expires_in };
   }
 
-  // Link im QR-Code: GitHub-Pages-Seite, Server-Adresse und Token stehen hinter dem #
+  // Link im QR-Code: GitHub-Pages-Seite, Abhol-Adresse und Token stehen hinter dem #
   // (der Teil nach # wird nie an einen Server geschickt)
   function viewerLink(publicUrl, token) {
-    return baseUrl() + "foto.html#s=" + encodeURIComponent(publicUrl) + "&t=" + encodeURIComponent(token);
+    return CFG.PAGES_URL + "foto.html#s=" + encodeURIComponent(publicUrl) + "&t=" + encodeURIComponent(token);
   }
 
   // QR-Code als SVG in ein Element zeichnen
@@ -119,5 +121,5 @@
       d + '" fill="#000"/></svg>';
   }
 
-  window.WCU = { baseUrl, startCamera, stopCamera, snapshot, countdown, flash, serverInfo, uploadBlob, viewerLink, renderQR };
+  window.WCU = { server, startCamera, stopCamera, snapshot, countdown, flash, serverInfo, serverStatus, uploadBlob, viewerLink, renderQR };
 })();

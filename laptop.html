@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="style.css">
 <style>
   body { display: flex; flex-direction: column; min-height: 100%; }
-  header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.5rem; gap: 1rem; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.5rem; gap: 1rem; flex-wrap: wrap; }
   header h1 { margin: 0; font-size: 1.5rem; }
   main { flex: 1; display: grid; grid-template-columns: 1fr 22rem; gap: 1.5rem; padding: 0 1.5rem 1.5rem; align-items: start; }
   .panel { background: var(--panel); border-radius: 18px; padding: 1.2rem; }
@@ -15,6 +15,10 @@
   .panel p { color: var(--muted); font-size: .9rem; margin: .5em 0; }
   .shoot { display: flex; justify-content: center; margin-top: 1rem; }
   .shoot button { font-size: 1.5rem; padding: .8em 2.4em; }
+  .phonebox { background: var(--panel); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5rem; text-align: center; padding: 1rem; }
+  .phonebox .big { font-size: 4rem; }
+  .phonebox h2 { margin: 0; font-size: 1.8rem; }
+  .phonebox p { color: var(--muted); margin: 0; }
 
   /* Ergebnis */
   #result { display: grid; grid-template-columns: 1fr 22rem; gap: 1.5rem; align-items: center; }
@@ -40,20 +44,31 @@
   </span>
 </header>
 
+<div id="httpsHint" class="error hidden" style="margin: 0 1.5rem;">
+  Diese Seite bitte über den lokalen Server öffnen: <b>http://localhost:8765/</b> (nach <code>python foto_server.py</code>).
+</div>
+
 <main id="camView">
   <section>
-    <div class="cam">
+    <!-- Laptop-Kamera (solange kein Handy verbunden ist) -->
+    <div id="webcamBox" class="cam">
       <video id="video" class="mirror" autoplay playsinline muted></video>
       <div id="count" class="count"></div>
       <div id="flash" class="flash"></div>
+    </div>
+    <!-- Handy hat Vorrang -->
+    <div id="phoneBox" class="cam phonebox hidden">
+      <div class="big">📱</div>
+      <h2>Handy-Kamera aktiv</h2>
+      <p>Foto am Handy aufnehmen – es erscheint hier automatisch.</p>
     </div>
     <div id="camError" class="error hidden"></div>
     <div class="shoot"><button id="shootBtn">📸 Foto machen</button></div>
   </section>
   <aside class="panel">
-    <h2>Handy als Kamera nutzen</h2>
-    <p>Mit dem Handy scannen, dann Foto am Handy auslösen – das Bild erscheint hier.</p>
-    <div id="pairQr" class="qr"></div>
+    <h2>Handy koppeln</h2>
+    <p>Handy ins selbe WLAN und diesen QR-Code scannen. Sobald das Handy verbunden ist, wird die Handy-Kamera benutzt und die Laptop-Kamera pausiert.</p>
+    <div id="pairQr" class="qr hidden"></div>
     <p id="pairLink"></p>
   </aside>
 </main>
@@ -63,7 +78,7 @@
     <img id="photo" class="photo" alt="Dein Foto">
   </section>
   <section class="scan">
-    <div id="uploading"><div class="spinner"></div><p>Foto wird hochgeladen …</p></div>
+    <div id="uploading"><div class="spinner"></div><p>Foto wird vorbereitet …</p></div>
     <div id="uploaded" class="hidden">
       <h2>📱 Scannen &amp; Foto holen</h2>
       <div id="resultQr" class="qr"></div>
@@ -71,7 +86,7 @@
     </div>
     <div id="uploadError" class="error hidden"></div>
     <p>
-      <button id="retryBtn" class="secondary hidden">Nochmal hochladen</button>
+      <button id="retryBtn" class="secondary hidden">Nochmal versuchen</button>
       <button id="newBtn">Nächstes Foto</button>
     </p>
   </section>
@@ -79,7 +94,6 @@
 
 <script src="config.js"></script>
 <script src="lib/qrcode.js"></script>
-<script src="lib/peerjs.min.js"></script>
 <script src="common.js"></script>
 <script>
 (function () {
@@ -87,30 +101,35 @@
   const CFG = window.CONFIG;
   document.title = CFG.TITLE + " – Laptop";
   $("title").textContent = CFG.TITLE;
+  if (location.protocol === "https:") $("httpsHint").classList.remove("hidden");
 
   let busy = false;
-  let lastBlob = null;
+  let phoneOn = false;
+  let seqSeen = null;
+  let lastGetUp = null;
+  let info = null;
+  let lastLanUrl = null;
 
-  // ---------- Kamera ----------
+  // ---------- Laptop-Kamera ----------
   async function initCamera() {
     try {
       await WCU.startCamera($("video"), "user");
       $("camError").classList.add("hidden");
     } catch (e) {
-      $("camError").textContent = "Laptop-Kamera nicht nutzbar: " + e.message + " (Das Handy kann trotzdem Fotos schicken.)";
+      $("camError").textContent = "Laptop-Kamera nicht nutzbar: " + e.message;
       $("camError").classList.remove("hidden");
     }
   }
 
   $("shootBtn").addEventListener("click", async () => {
-    if (busy) return;
+    if (busy || phoneOn) return;
     busy = true;
     $("shootBtn").disabled = true;
     try {
       await WCU.countdown($("count"), CFG.COUNTDOWN);
       WCU.flash($("flash"));
       const blob = await WCU.snapshot($("video"));
-      showPhoto(blob);
+      present(URL.createObjectURL(blob), () => WCU.uploadBlob(blob));
     } catch (e) {
       $("camError").textContent = e.message;
       $("camError").classList.remove("hidden");
@@ -120,28 +139,26 @@
     }
   });
 
-  // ---------- Ergebnis ----------
-  let photoUrl = null;
-  async function showPhoto(blob) {
-    lastBlob = blob;
-    if (photoUrl) URL.revokeObjectURL(photoUrl);
-    photoUrl = URL.createObjectURL(blob);
-    $("photo").src = photoUrl;
+  // ---------- Ergebnis anzeigen ----------
+  // previewSrc: Bildadresse für die Vorschau, getUp: liefert { token, publicUrl, ttl }
+  async function present(previewSrc, getUp) {
+    lastGetUp = getUp;
+    $("photo").src = previewSrc;
     $("camView").classList.add("hidden");
     $("result").classList.remove("hidden");
-    await upload();
+    await run();
   }
 
-  async function upload() {
+  async function run() {
     $("uploading").classList.remove("hidden");
     $("uploaded").classList.add("hidden");
     $("uploadError").classList.add("hidden");
     $("retryBtn").classList.add("hidden");
     try {
-      const up = await WCU.uploadBlob(lastBlob);
+      const up = await lastGetUp();
       WCU.renderQR($("resultQr"), WCU.viewerLink(up.publicUrl, up.token));
       const h = up.ttl / 3600;
-      $("expiryNote").textContent = "Das Bild ist " + (h >= 1 ? Math.round(h) + " Std." : Math.round(h * 60) + " Min.") + " abrufbar.";
+      $("expiryNote").textContent = "Das Foto ist " + (h >= 1 ? Math.round(h) + " Std." : Math.round(h * 60) + " Min.") + " abrufbar.";
       $("uploading").classList.add("hidden");
       $("uploaded").classList.remove("hidden");
     } catch (e) {
@@ -152,83 +169,87 @@
     }
   }
 
-  $("retryBtn").addEventListener("click", upload);
+  $("retryBtn").addEventListener("click", run);
   $("newBtn").addEventListener("click", () => {
     $("result").classList.add("hidden");
     $("camView").classList.remove("hidden");
-    lastBlob = null;
   });
 
-  // ---------- Handy-Kopplung (PeerJS) ----------
-  const ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
-  function makeCode() {
-    let s = "";
-    const r = crypto.getRandomValues(new Uint8Array(6));
-    for (let i = 0; i < 6; i++) s += ALPHABET[r[i] % ALPHABET.length];
-    return s;
+  // Foto, das vom Handy geschickt wurde (liegt schon auf dem Server)
+  function presentFromPhone(token) {
+    present(WCU.server() + "/img/" + encodeURIComponent(token), async () => {
+      const i = await WCU.serverInfo();
+      if (!i.public_url) throw new Error("Der Server hat keine Abhol-Adresse (Cloudflare-Tunnel fehlt).");
+      return { token: token, publicUrl: i.public_url, ttl: i.ttl };
+    });
   }
-  let code = localStorage.getItem("wcu-code") || makeCode();
-  let peer = null;
-  const conns = new Set();
 
-  function setPhoneStatus() {
-    const n = conns.size;
+  // ---------- Handy hat Vorrang ----------
+  function setPhone(on) {
+    if (on === phoneOn) return;
+    phoneOn = on;
     const el = $("phoneStatus");
-    if (n > 0) { el.textContent = "Handy verbunden ✓"; el.className = "status ok"; }
-    else { el.textContent = "Handy: nicht verbunden"; el.className = "status"; }
-  }
-
-  function showPairing() {
-    const link = WCU.baseUrl() + "handy.html#" + code;
-    WCU.renderQR($("pairQr"), link);
-    $("pairLink").textContent = link;
-  }
-
-  function startPeer() {
-    localStorage.setItem("wcu-code", code);
-    if (peer) { try { peer.destroy(); } catch (e) {} }
-    peer = new Peer("wcu-" + code);
-    peer.on("open", showPairing);
-    peer.on("connection", (c) => {
-      c.on("open", () => { conns.add(c); setPhoneStatus(); });
-      c.on("close", () => { conns.delete(c); setPhoneStatus(); });
-      c.on("error", () => { conns.delete(c); setPhoneStatus(); });
-      c.on("data", (msg) => {
-        if (msg && msg.kind === "photo" && msg.data) {
-          const blob = new Blob([msg.data], { type: "image/jpeg" });
-          try { c.send({ kind: "received" }); } catch (e) {}
-          showPhoto(blob);
-        }
-      });
-    });
-    peer.on("disconnected", () => { try { peer.reconnect(); } catch (e) {} });
-    peer.on("error", (err) => {
-      if (err.type === "unavailable-id") {
-        code = makeCode();
-        startPeer();
-      } else {
-        $("pairLink").textContent = "Verbindung zum Kopplungs-Server fehlgeschlagen (" + err.type + "). Neuer Versuch …";
-        setTimeout(startPeer, 5000);
-      }
-    });
-  }
-
-  // ---------- Foto-Server prüfen ----------
-  async function checkServer() {
-    const el = $("serverStatus");
-    try {
-      const info = await WCU.serverInfo();
-      if (info.public_url) { el.textContent = "Server ✓"; el.className = "status ok"; }
-      else { el.textContent = "Server ohne Tunnel"; el.className = "status err"; }
-    } catch (e) {
-      el.textContent = "Server nicht erreichbar"; el.className = "status err";
+    if (on) {
+      WCU.stopCamera();
+      $("webcamBox").classList.add("hidden");
+      $("phoneBox").classList.remove("hidden");
+      $("shootBtn").classList.add("hidden");
+      el.textContent = "Handy verbunden ✓";
+      el.className = "status ok";
+    } else {
+      $("phoneBox").classList.add("hidden");
+      $("webcamBox").classList.remove("hidden");
+      $("shootBtn").classList.remove("hidden");
+      el.textContent = "Handy: nicht verbunden";
+      el.className = "status";
+      initCamera();
     }
   }
 
-  initCamera();
-  startPeer();
-  checkServer();
-  setInterval(checkServer, 10000);
+  // ---------- Server abfragen ----------
+  async function poll() {
+    const el = $("serverStatus");
+    try {
+      const s = await WCU.serverStatus();
+      if (seqSeen === null) seqSeen = s.seq; // alte Fotos beim Laden nicht anzeigen
+      else if (s.seq !== seqSeen) {
+        seqSeen = s.seq;
+        if (s.token) presentFromPhone(s.token);
+      }
+      setPhone(s.phone);
+      return true;
+    } catch (e) {
+      el.textContent = "Server nicht erreichbar";
+      el.className = "status err";
+      return false;
+    }
+  }
+
+  async function loadInfo() {
+    const el = $("serverStatus");
+    try {
+      info = await WCU.serverInfo();
+      if (info.public_url) { el.textContent = "Server ✓"; el.className = "status ok"; }
+      else { el.textContent = "Server ohne Tunnel"; el.className = "status err"; }
+      if (info.lan_url && info.lan_url !== lastLanUrl) {
+        lastLanUrl = info.lan_url;
+        WCU.renderQR($("pairQr"), info.lan_url);
+        $("pairQr").classList.remove("hidden");
+        $("pairLink").textContent = info.lan_url;
+      } else if (!info.lan_url) {
+        $("pairQr").classList.add("hidden");
+        $("pairLink").textContent = "Keine WLAN-Adresse gefunden. Server mit --lan-ip 192.168.x.x starten.";
+      }
+    } catch (e) { /* poll() zeigt den Fehler */ }
+  }
+
+  (async function start() {
+    await poll();
+    await loadInfo();
+    if (!phoneOn) initCamera();
+    setInterval(poll, 1000);
+    setInterval(loadInfo, 10000);
+  })();
 })();
 </script>
 </body>

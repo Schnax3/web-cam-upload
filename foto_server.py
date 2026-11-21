@@ -2,22 +2,27 @@
 """
 Foto-Server für die Foto-Aktion (nur Python-Standardbibliothek).
 
-- Nimmt Fotos vom Laptop-Browser entgegen (nur lokal) und speichert sie unter einem
-  zufälligen, nicht erratbaren Token.
-- Liefert ein Foto nur aus, wenn man den Token kennt (steht nur im QR-Code).
-  Es gibt keine Liste und keine Übersicht aller Bilder.
-- Löscht Fotos automatisch nach --ttl Stunden.
-- Startet (wenn installiert) einen kostenlosen Cloudflare-Quick-Tunnel, damit die
-  Handys der Besucher den Laptop per https erreichen. Die Adresse ändert sich bei
-  jedem Start, das ist egal – sie steht im QR-Code.
+Alles läuft lokal auf dem Laptop:
+  - Laptop-Seite:  http://localhost:8765/            (Kamera des Laptops)
+  - Handy-Seite:   http://<Laptop-IP>:8765/handy.html#<Schlüssel>  (im selben WLAN)
+Nur das Abholen der Fotos läuft über das Internet: foto.html (GitHub Pages) holt das
+Foto per Token über einen Cloudflare-Tunnel vom Laptop.
+
+Wer darf was (Server prüft pro Anfrage, woher sie kommt):
+  lokal  (Laptop selbst):  alles
+  lan    (Handy im WLAN):  nur Handy-Seite + Foto senden, und nur mit Schlüssel
+  remote (über Tunnel):    nur GET /img/<Token>
 
 Start:   python foto_server.py
 """
 import argparse
+import hmac
+import ipaddress
 import json
 import re
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -28,15 +33,17 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+KEY_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 MAX_BYTES = 12 * 1024 * 1024
-# Diese Header setzen Tunnel/Proxys bei Anfragen von außen. Fehlen sie, kommt die
-# Anfrage direkt vom Laptop selbst.
+PHONE_TIMEOUT = 8  # Sekunden ohne Lebenszeichen = Handy getrennt
+# Diese Header setzen Tunnel/Proxys bei Anfragen von außen.
 FORWARD_HEADERS = ("X-Forwarded-For", "CF-Connecting-IP", "Cf-Ray", "Forwarded", "X-Real-Ip", "Cdn-Loop")
 STATIC_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
     ".js": "application/javascript; charset=utf-8",
 }
+LAN_FILES = {"handy.html", "style.css", "config.js"}  # das darf ein Handy im WLAN laden
 
 
 class State:
@@ -44,7 +51,19 @@ class State:
     ttl = 24 * 3600
     photos = ROOT / "photos"
     public_url = None
-    origins = set()
+    pages_origin = "https://schnax3.github.io"
+    key = ""
+    lan_ip = None
+    lock = threading.Lock()
+    phone_seen = 0.0
+    seq = 0
+    last_token = None
+
+
+def lan_url():
+    if not State.lan_ip:
+        return None
+    return f"http://{State.lan_ip}:{State.port}/handy.html#{State.key}"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -53,40 +72,64 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------- Helfer ----------
     def log_message(self, fmt, *args):
-        # Token nicht ins Log schreiben
         line = (self.requestline or "").split(" ")
         path = line[1] if len(line) > 1 else ""
         path = re.sub(r"/img/[^/?\s]+", "/img/…", path)
+        if path.startswith(("/status", "/phone/hello")):
+            return  # Polling nicht ausgeben
         print(f"  {self.command} {path}")
 
-    def is_local(self):
-        if self.client_address[0] not in ("127.0.0.1", "::1"):
-            return False
-        for h in FORWARD_HEADERS:
-            if self.headers.get(h):
-                return False
+    def kind(self):
+        """'local' (Laptop selbst), 'lan' (Gerät im WLAN) oder 'remote' (Tunnel/Internet)."""
+        if any(self.headers.get(h) for h in FORWARD_HEADERS):
+            return "remote"
+        try:
+            ip = ipaddress.ip_address(self.client_address[0])
+        except ValueError:
+            return "remote"
+        if ip.is_loopback:
+            return "local"
+        if ip.is_private or ip.is_link_local:
+            return "lan"
+        return "remote"
+
+    def host_ok(self, kind):
+        """Schutz vor DNS-Rebinding: Host muss localhost bzw. eine IP-Adresse sein."""
         host = (self.headers.get("Host") or "").lower()
-        return host in (f"127.0.0.1:{State.port}", f"localhost:{State.port}")
+        if kind == "local":
+            return host in (f"127.0.0.1:{State.port}", f"localhost:{State.port}")
+        return re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}:%d" % State.port, host) is not None
 
     def origin_ok(self):
+        """Browser-Anfragen müssen von derselben Adresse kommen wie die Seite (kein fremdes Skript)."""
         origin = self.headers.get("Origin")
-        return origin is None or origin in State.origins
+        if origin is None:
+            return True
+        u = urlparse(origin)
+        return u.scheme == "http" and u.netloc.lower() == (self.headers.get("Host") or "").lower()
+
+    def local_only(self):
+        return self.kind() == "local" and self.host_ok("local") and self.origin_ok()
+
+    def phone_ok(self):
+        k = self.kind()
+        if k not in ("local", "lan") or not self.host_ok(k) or not self.origin_ok():
+            return False
+        return hmac.compare_digest(self.headers.get("X-Key", ""), State.key)
 
     def cors(self):
-        origin = self.headers.get("Origin")
-        if origin and origin in State.origins:
-            self.send_header("Access-Control-Allow-Origin", origin)
+        # Nur die GitHub-Pages-Seite darf Fotos per Browser abrufen (foto.html)
+        if self.headers.get("Origin") == State.pages_origin:
+            self.send_header("Access-Control-Allow-Origin", State.pages_origin)
             self.send_header("Vary", "Origin")
 
-    def reply(self, code, body=b"", ctype="application/json", extra=None):
+    def reply(self, code, body=b"", ctype="application/json"):
         self.send_response(code)
         self.cors()
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        for k, v in (extra or {}).items():
-            self.send_header(k, v)
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
@@ -94,13 +137,37 @@ class Handler(BaseHTTPRequestHandler):
     def reply_json(self, code, obj):
         self.reply(code, json.dumps(obj).encode())
 
+    def read_jpeg(self):
+        """Liest den Body, prüft Größe und JPEG-Kennung. Gibt Bytes oder None (Antwort ist dann schon gesendet)."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if length <= 0:
+            self.reply_json(400, {"error": "leer"})
+            return None
+        if length > MAX_BYTES:
+            self.reply_json(413, {"error": "zu groß"})
+            return None
+        data = self.rfile.read(length)
+        if data[:3] != b"\xff\xd8\xff":
+            self.reply_json(400, {"error": "kein JPEG"})
+            return None
+        return data
+
+    @staticmethod
+    def save_photo(data):
+        token = secrets.token_urlsafe(16)
+        State.photos.mkdir(exist_ok=True)
+        (State.photos / f"{token}.jpg").write_bytes(data)
+        return token
+
     # ---------- Anfragen ----------
     def do_OPTIONS(self):
         self.send_response(204)
         self.cors()
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, ngrok-skip-browser-warning")
-        self.send_header("Access-Control-Allow-Private-Network", "true")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "ngrok-skip-browser-warning")
         self.send_header("Access-Control-Max-Age", "600")
         self.send_header("Content-Length", "0")
         self.end_headers()
@@ -109,51 +176,74 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
 
         if path == "/info":
-            if not (self.is_local() and self.origin_ok()):
+            if not self.local_only():
                 return self.reply_json(403, {"error": "nur lokal"})
-            return self.reply_json(200, {"public_url": State.public_url, "ttl": State.ttl})
+            return self.reply_json(200, {"public_url": State.public_url, "ttl": State.ttl, "lan_url": lan_url()})
+
+        if path == "/status":
+            if not self.local_only():
+                return self.reply_json(403, {"error": "nur lokal"})
+            with State.lock:
+                phone = (time.time() - State.phone_seen) < PHONE_TIMEOUT
+                return self.reply_json(200, {"phone": phone, "seq": State.seq, "token": State.last_token})
 
         m = re.fullmatch(r"/img/([^/]+)", path)
         if m:
             token = m.group(1)
             if not TOKEN_RE.match(token):
                 return self.reply_json(404, {"error": "nicht gefunden"})
-            f = State.photos / f"{token}.jpg"
             try:
-                data = f.read_bytes()
+                data = (State.photos / f"{token}.jpg").read_bytes()
             except OSError:
                 return self.reply_json(404, {"error": "nicht gefunden"})
             return self.reply(200, data, "image/jpeg")
 
-        # Statische Seiten nur lokal (Notlösung: Laptop-Seite direkt vom Server öffnen)
-        if self.is_local():
+        # Seiten ausliefern: Laptop alles, Handy im WLAN nur die Handy-Seite
+        k = self.kind()
+        if k in ("local", "lan") and self.host_ok(k):
             name = "laptop.html" if path == "/" else path.lstrip("/")
+            if k == "lan" and name not in LAN_FILES:
+                return self.reply_json(404, {"error": "nicht gefunden"})
             p = (ROOT / name).resolve()
             if p.suffix in STATIC_TYPES and p.is_file() and ROOT in p.parents:
                 return self.reply(200, p.read_bytes(), STATIC_TYPES[p.suffix])
         return self.reply_json(404, {"error": "nicht gefunden"})
 
     def do_POST(self):
-        if urlparse(self.path).path != "/upload":
-            return self.reply_json(404, {"error": "nicht gefunden"})
-        if not (self.is_local() and self.origin_ok()):
-            return self.reply_json(403, {"error": "nur lokal"})
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-        except ValueError:
-            length = 0
-        if length <= 0:
-            return self.reply_json(400, {"error": "leer"})
-        if length > MAX_BYTES:
-            return self.reply_json(413, {"error": "zu groß"})
-        data = self.rfile.read(length)
-        if data[:3] != b"\xff\xd8\xff":
-            return self.reply_json(400, {"error": "kein JPEG"})
-        token = secrets.token_urlsafe(16)
-        State.photos.mkdir(exist_ok=True)
-        (State.photos / f"{token}.jpg").write_bytes(data)
-        print("  Foto gespeichert")
-        return self.reply_json(200, {"token": token, "expires_in": State.ttl})
+        path = urlparse(self.path).path
+
+        if path == "/upload":  # Foto von der Laptop-Kamera
+            if not self.local_only():
+                return self.reply_json(403, {"error": "nur lokal"})
+            data = self.read_jpeg()
+            if data is None:
+                return
+            token = self.save_photo(data)
+            print("  Foto gespeichert (Laptop)")
+            return self.reply_json(200, {"token": token, "expires_in": State.ttl})
+
+        if path == "/phone/hello":  # Lebenszeichen des Handys
+            if not self.phone_ok():
+                return self.reply_json(403, {"error": "Schlüssel falsch oder Zugriff nicht erlaubt"})
+            with State.lock:
+                State.phone_seen = time.time()
+            return self.reply_json(200, {"ok": True})
+
+        if path == "/phone/photo":  # Foto vom Handy
+            if not self.phone_ok():
+                return self.reply_json(403, {"error": "Schlüssel falsch oder Zugriff nicht erlaubt"})
+            data = self.read_jpeg()
+            if data is None:
+                return
+            token = self.save_photo(data)
+            with State.lock:
+                State.phone_seen = time.time()
+                State.seq += 1
+                State.last_token = token
+            print("  Foto gespeichert (Handy)")
+            return self.reply_json(200, {"ok": True})
+
+        return self.reply_json(404, {"error": "nicht gefunden"})
 
 
 def cleanup_loop():
@@ -167,6 +257,41 @@ def cleanup_loop():
                 except OSError:
                     pass
         time.sleep(60)
+
+
+def detect_lan_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("10.255.255.255", 1))  # es wird nichts gesendet, nur die Route bestimmt
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except OSError:
+        pass
+    try:
+        return socket.gethostbyname(socket.gethostname())
+    except OSError:
+        return None
+
+
+def load_key(cli_key):
+    f = ROOT / ".pairkey"
+    if cli_key:
+        if not KEY_RE.match(cli_key):
+            sys.exit("--key: nur Buchstaben, Ziffern, _ und -, 6 bis 64 Zeichen")
+        return cli_key
+    try:
+        k = f.read_text().strip()
+        if KEY_RE.match(k):
+            return k
+    except OSError:
+        pass
+    k = secrets.token_urlsafe(9)
+    try:
+        f.write_text(k)
+    except OSError:
+        pass
+    return k
 
 
 def start_tunnel(port):
@@ -195,20 +320,26 @@ def main():
     ap = argparse.ArgumentParser(description="Foto-Server für die Foto-Aktion")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--ttl", type=float, default=24, help="Stunden, nach denen Fotos gelöscht werden (Standard 24)")
-    ap.add_argument("--origin", default="https://schnax3.github.io", help="Erlaubte Seite (GitHub Pages)")
+    ap.add_argument("--origin", default="https://schnax3.github.io", help="Adresse der GitHub-Pages-Seite (nur Domain)")
     ap.add_argument("--public-url", help="Eigene https-Adresse statt Cloudflare-Tunnel (z. B. Tailscale Funnel)")
     ap.add_argument("--no-tunnel", action="store_true", help="Keinen Tunnel starten")
+    ap.add_argument("--no-lan", action="store_true", help="Nur der Laptop selbst darf zugreifen (kein Handy im WLAN)")
+    ap.add_argument("--lan-ip", help="IP-Adresse des Laptops im WLAN, falls die automatische Erkennung falsch liegt")
+    ap.add_argument("--key", help="Schlüssel für die Handy-Kopplung (Standard: zufällig, in .pairkey gespeichert)")
     args = ap.parse_args()
 
     State.port = args.port
     State.ttl = int(args.ttl * 3600)
+    State.pages_origin = args.origin.rstrip("/")
     State.photos.mkdir(exist_ok=True)
-    State.origins = {args.origin.rstrip("/"), f"http://127.0.0.1:{args.port}", f"http://localhost:{args.port}"}
+    State.key = load_key(args.key)
+    State.lan_ip = None if args.no_lan else (args.lan_ip or detect_lan_ip())
 
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    bind = "127.0.0.1" if args.no_lan else "0.0.0.0"
+    server = ThreadingHTTPServer((bind, args.port), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     threading.Thread(target=cleanup_loop, daemon=True).start()
-    print(f"Foto-Server läuft auf http://127.0.0.1:{args.port}  (Fotos werden nach {args.ttl:g} h gelöscht)")
+    print(f"Foto-Server läuft (Fotos werden nach {args.ttl:g} h gelöscht)")
 
     proc = None
     if args.public_url:
@@ -217,16 +348,20 @@ def main():
         print("Starte Cloudflare-Tunnel …")
         proc = start_tunnel(args.port)
         if proc is None:
-            print("\n!! 'cloudflared' ist nicht installiert. Ohne Tunnel erreichen Besucher den Laptop nicht.")
+            print("\n!! 'cloudflared' ist nicht installiert. Ohne Tunnel können Besucher ihr Foto nicht abholen.")
             print("   Windows: winget install Cloudflare.cloudflared   (danach neues Terminal öffnen)")
             print("   Oder eigene Adresse angeben: python foto_server.py --public-url https://...\n")
         elif not State.public_url:
             print("!! Tunnel-Adresse nicht erhalten. Internetverbindung prüfen.")
 
+    print()
+    print(f"Laptop-Seite:  http://localhost:{args.port}/")
+    if lan_url():
+        print(f"Handy-Seite:   {lan_url()}   (Handy im selben WLAN; auf der Laptop-Seite steht ein QR dafür)")
+    elif not args.no_lan:
+        print("!! Keine WLAN-Adresse gefunden. Mit --lan-ip 192.168.x.x angeben.")
     if State.public_url:
-        print(f"Öffentliche Adresse (nur per QR-Token abrufbar): {State.public_url}")
-    print(f"\nLaptop-Seite:  {args.origin.rstrip('/')}/web-cam-upload/laptop.html")
-    print(f"oder lokal:    http://localhost:{args.port}/   (falls der Browser die erste nicht erlaubt)")
+        print(f"Abhol-Adresse (nur per Token): {State.public_url}")
     print("Beenden mit Strg+C\n")
 
     try:

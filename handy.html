@@ -6,142 +6,121 @@
 <title>Handy – Foto-Aktion</title>
 <link rel="stylesheet" href="style.css">
 <style>
-  html, body { overflow: hidden; }
-  body { position: fixed; inset: 0; }
-  #camView { position: absolute; inset: 0; background: #000; }
-  #camView video { width: 100%; height: 100%; object-fit: cover; display: block; }
-  #camView video.mirror { transform: scaleX(-1); }
-  .top { position: absolute; top: 0; left: 0; right: 0; padding: calc(env(safe-area-inset-top) + .8rem) 1rem 0; display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
-  .bottom { position: absolute; bottom: 0; left: 0; right: 0; padding: 1rem 1rem calc(env(safe-area-inset-bottom) + 1.4rem); display: flex; justify-content: center; align-items: center; }
-  .shutter { width: 5.2rem; height: 5.2rem; border-radius: 50%; padding: 0; background: #fff; border: 6px solid rgba(255,255,255,.45); background-clip: padding-box; }
-  .shutter:disabled { opacity: .4; }
-  .flip { position: absolute; right: 1.5rem; bottom: calc(env(safe-area-inset-bottom) + 2rem); width: 3.4rem; height: 3.4rem; border-radius: 50%; padding: 0; font-size: 1.5rem; background: rgba(0,0,0,.5); }
-  .toast { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 8rem); transform: translateX(-50%); max-width: 90%; }
-
-  #noCode { position: absolute; inset: 0; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; padding: 2rem; text-align: center; }
-  #noCode p { color: var(--muted); max-width: 26rem; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.2rem; padding: 1.5rem; text-align: center; min-height: 100%; }
+  h1 { margin: 0; font-size: 1.5rem; }
+  .big { width: min(80vw, 20rem); font-size: 1.3rem; padding: 1.4em 1em; }
+  .row { display: flex; flex-direction: column; gap: .8rem; align-items: center; }
+  #thumb { width: min(80vw, 20rem); max-height: 35vh; object-fit: contain; border-radius: 14px; background: #000; }
+  .hint { color: var(--muted); max-width: 26rem; margin: 0; }
+  input[type=file] { display: none; }
 </style>
 </head>
 <body>
+  <h1 id="title">📱 Handy-Kamera</h1>
+  <span id="conn" class="status">Verbinde …</span>
 
-<div id="noCode" class="hidden">
-  <h1>📱 Handy als Kamera</h1>
-  <p>Diese Seite wird über den QR-Code auf der Laptop-Seite geöffnet (<b>laptop.html</b>). Bitte dort den QR-Code „Handy als Kamera nutzen“ scannen.</p>
-</div>
+  <div id="noKey" class="error hidden">
+    Kein Schlüssel im Link. Bitte den QR-Code auf der Laptop-Seite scannen.
+  </div>
 
-<div id="camView">
-  <video id="video" autoplay playsinline muted></video>
-  <div id="count" class="count"></div>
-  <div id="flash" class="flash"></div>
-  <div class="top">
-    <span id="modeStatus" class="status">…</span>
+  <div id="main" class="row">
+    <button id="backBtn" class="big">📷 Foto aufnehmen</button>
+    <button id="selfieBtn" class="big secondary">🤳 Selfie</button>
+    <img id="thumb" class="hidden" alt="Letztes Foto">
+    <span id="msg" class="status hidden"></span>
+    <p class="hint">Es öffnet sich die Kamera-App deines Handys. Nach dem Foto wird es automatisch an den Laptop geschickt.</p>
   </div>
-  <div id="toast" class="toast status err hidden"></div>
-  <div class="bottom">
-    <button id="shootBtn" class="shutter" aria-label="Foto machen"></button>
-    <button id="flipBtn" class="flip" aria-label="Kamera wechseln">🔄</button>
-  </div>
-</div>
+
+  <input id="fileBack" type="file" accept="image/*" capture="environment">
+  <input id="fileSelfie" type="file" accept="image/*" capture="user">
 
 <script src="config.js"></script>
-<script src="lib/peerjs.min.js"></script>
-<script src="common.js"></script>
 <script>
 (function () {
+  "use strict";
   const $ = (id) => document.getElementById(id);
   const CFG = window.CONFIG;
   document.title = CFG.TITLE + " – Handy";
 
-  // Code aus dem Link (…/handy.html#abc123) = Kopplung mit dem Laptop
-  const code = location.hash.replace("#", "").trim();
-  if (!code) {
-    $("camView").classList.add("hidden");
-    $("noCode").classList.remove("hidden");
+  const key = location.hash.replace(/^#/, "").trim();
+  if (!key) {
+    $("main").classList.add("hidden");
+    $("conn").classList.add("hidden");
+    $("noKey").classList.remove("hidden");
     return;
   }
 
-  let facing = "environment";
-  let busy = false;
-  let conn = null;
-  let peer = null;
+  function setConn(ok) {
+    const el = $("conn");
+    el.textContent = ok ? "Mit Laptop verbunden ✓" : "Keine Verbindung zum Laptop";
+    el.className = "status " + (ok ? "ok" : "err");
+  }
 
-  function setMode(text, cls) {
-    const el = $("modeStatus");
+  function setMsg(text, cls) {
+    const el = $("msg");
     el.textContent = text;
-    el.className = "status" + (cls ? " " + cls : "");
+    el.className = "status " + (cls || "");
   }
 
-  let toastTimer = null;
-  function toast(text) {
-    const t = $("toast");
-    t.textContent = text;
-    t.classList.remove("hidden");
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.add("hidden"), 3500);
-  }
-
-  // ---------- Kamera ----------
-  async function initCamera() {
+  // Lebenszeichen: so weiß der Laptop, dass ein Handy da ist (dann hat das Handy Vorrang)
+  async function hello() {
     try {
-      await WCU.startCamera($("video"), facing);
-      $("video").classList.toggle("mirror", facing === "user");
+      const r = await fetch("/phone/hello", { method: "POST", headers: { "X-Key": key }, cache: "no-store" });
+      if (r.status === 403) { setConn(false); $("conn").textContent = "Schlüssel falsch – QR neu scannen"; return; }
+      setConn(r.ok);
     } catch (e) {
-      toast("Kamera: " + e.message);
+      setConn(false);
+    }
+  }
+  hello();
+  setInterval(hello, 3000);
+
+  // Foto verkleinern und als JPEG ausgeben (Drehung aus den Kamera-Daten wird vom Browser beachtet)
+  function shrink(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, CFG.MAX_SIZE / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.naturalWidth * scale);
+        c.height = Math.round(img.naturalHeight * scale);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        c.toBlob((b) => (b ? resolve(b) : reject(new Error("Foto konnte nicht verarbeitet werden."))), "image/jpeg", 0.88);
+      };
+      img.onerror = () => reject(new Error("Foto konnte nicht gelesen werden."));
+      img.src = url;
+    });
+  }
+
+  async function handleFile(input) {
+    const file = input.files && input.files[0];
+    input.value = ""; // dieselbe Datei später erneut wählbar
+    if (!file) return;
+    setMsg("Foto wird gesendet …", "");
+    try {
+      const blob = await shrink(file);
+      const r = await fetch("/phone/photo", {
+        method: "POST",
+        headers: { "X-Key": key, "Content-Type": "image/jpeg" },
+        body: blob,
+      });
+      if (!r.ok) throw new Error(r.status === 403 ? "Schlüssel falsch – QR neu scannen." : "Senden fehlgeschlagen (" + r.status + ").");
+      const t = $("thumb");
+      if (t.src) URL.revokeObjectURL(t.src);
+      t.src = URL.createObjectURL(blob);
+      t.classList.remove("hidden");
+      setMsg("Foto angekommen ✓ – QR-Code steht am Laptop", "ok");
+    } catch (e) {
+      setMsg(e.message || "Senden fehlgeschlagen.", "err");
     }
   }
 
-  $("flipBtn").addEventListener("click", async () => {
-    facing = facing === "environment" ? "user" : "environment";
-    await initCamera();
-  });
-
-  $("shootBtn").addEventListener("click", async () => {
-    if (busy) return;
-    busy = true;
-    $("shootBtn").disabled = true;
-    try {
-      await WCU.countdown($("count"), CFG.COUNTDOWN);
-      WCU.flash($("flash"));
-      const blob = await WCU.snapshot($("video"));
-      if (!conn || !conn.open) throw new Error("Nicht mit dem Laptop verbunden.");
-      conn.send({ kind: "photo", data: await blob.arrayBuffer() });
-      setMode("Gesendet …", "");
-    } catch (e) {
-      toast(e.message);
-    } finally {
-      busy = false;
-      $("shootBtn").disabled = false;
-    }
-  });
-
-  // ---------- Verbindung zum Laptop (PeerJS / WebRTC) ----------
-  function connectToLaptop() {
-    setMode("Verbinde mit Laptop …", "");
-    peer = new Peer();
-    peer.on("open", () => {
-      conn = peer.connect("wcu-" + code, { reliable: true });
-      conn.on("open", () => setMode("Mit Laptop verbunden ✓", "ok"));
-      conn.on("data", (msg) => { if (msg && msg.kind === "received") setMode("Foto angekommen ✓", "ok"); });
-      conn.on("close", () => { setMode("Verbindung weg – neuer Versuch …", "err"); retry(); });
-      conn.on("error", () => { setMode("Verbindungsfehler …", "err"); retry(); });
-    });
-    peer.on("disconnected", () => { try { peer.reconnect(); } catch (e) {} });
-    peer.on("error", (err) => {
-      setMode(err.type === "peer-unavailable" ? "Laptop nicht gefunden …" : "Verbindungsfehler …", "err");
-      retry();
-    });
-  }
-  let retryTimer = null;
-  function retry() {
-    clearTimeout(retryTimer);
-    retryTimer = setTimeout(() => {
-      try { if (peer) peer.destroy(); } catch (e) {}
-      connectToLaptop();
-    }, 3000);
-  }
-
-  initCamera();
-  connectToLaptop();
+  $("backBtn").addEventListener("click", () => $("fileBack").click());
+  $("selfieBtn").addEventListener("click", () => $("fileSelfie").click());
+  $("fileBack").addEventListener("change", (e) => handleFile(e.target));
+  $("fileSelfie").addEventListener("change", (e) => handleFile(e.target));
 })();
 </script>
 </body>
