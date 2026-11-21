@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dein Foto</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: flex; flex-direction: column; align-items: center; padding: 1rem; gap: 1rem; text-align: center; }
+  img { width: 100%; max-width: 40rem; border-radius: 14px; background: #000; }
+  .hint { color: var(--muted); font-size: .9rem; max-width: 32rem; }
+</style>
+</head>
+<body>
+  <h1>📸 Dein Foto</h1>
+  <div id="error" class="error hidden"></div>
+  <img id="img" class="hidden" alt="Dein Foto">
+  <div id="actions" class="hidden">
+    <button id="saveBtn">Foto speichern</button>
+  </div>
+  <p id="hint" class="hint hidden">Klappt der Button nicht: Bild lange drücken und „Zu Fotos hinzufügen“ bzw. „Bild speichern“ wählen.</p>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const raw = new URLSearchParams(location.search).get("i") || "";
+
+  // Nur Bilder von imgbb zulassen (verhindert, dass der Link auf fremde Seiten zeigt)
+  if (!/^https:\/\/i\.ibb\.co\/[A-Za-z0-9_\-\/.]+$/.test(raw)) {
+    $("error").textContent = "Kein gültiger Foto-Link. Bitte den QR-Code erneut scannen.";
+    $("error").classList.remove("hidden");
+    return;
+  }
+
+  const img = $("img");
+  img.onerror = () => {
+    img.classList.add("hidden");
+    $("actions").classList.add("hidden");
+    $("error").textContent = "Das Foto ist nicht mehr verfügbar (abgelaufen?).";
+    $("error").classList.remove("hidden");
+  };
+  img.onload = () => {
+    img.classList.remove("hidden");
+    $("actions").classList.remove("hidden");
+    $("hint").classList.remove("hidden");
+  };
+  img.src = raw;
+
+  // Bild vorab laden, damit "Speichern" sofort reagiert (wichtig für das Teilen-Menü am iPhone)
+  let blobPromise = fetch(raw).then((r) => r.blob()).catch(() => null);
+  const filename = "foto.jpg";
+
+  $("saveBtn").addEventListener("click", async () => {
+    const blob = await blobPromise;
+    if (!blob) { window.open(raw, "_blank"); return; }
+    const file = new File([blob], filename, { type: blob.type || "image/jpeg" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); return; } catch (e) { if (e.name === "AbortError") return; }
+    }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  });
+})();
+</script>
+</body>
+</html>
