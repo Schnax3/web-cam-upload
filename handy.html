@@ -70,7 +70,7 @@
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // ---------- Kamera ----------
-  let facing = "environment";
+  const facing = "environment";
   let stream = null;
 
   async function startCam() {
@@ -126,47 +126,65 @@
   async function handle(cmd) {
     try {
       if (cmd === "shoot") await shoot();
-      else if (cmd === "flip") {
-        facing = facing === "environment" ? "user" : "environment";
-        await startCam();
-        note(facing === "user" ? "Frontkamera" : "Rückkamera");
-      }
     } catch (e) {
       note(e.message || "Fehler");
     }
   }
 
-  // ---------- Livebild senden (ca. 9 Bilder pro Sekunde); die Antwort enthält Befehle ----------
+  // ---------- Livebild senden (bis 30 Bilder pro Sekunde); die Antwort enthält Befehle ----------
+  // Während ein Bild gesendet wird, wird das nächste schon kodiert (Pipeline); es ist immer nur
+  // ein Bild unterwegs, sodass die Reihenfolge stimmt. Ist das Netz langsam, werden Bilder
+  // übersprungen statt aufgestaut – das Livebild bleibt aktuell.
+  const FPS = 30, LIVE_DIM = 800, LIVE_Q = 0.6;
+
+  function nextVideoFrame() {
+    return new Promise((resolve) => {
+      if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(() => resolve());
+      else requestAnimationFrame(() => resolve());
+    });
+  }
+
+  async function send(frame) {
+    const r = await fetch("/phone/frame", {
+      method: "POST",
+      headers: { "X-Key": key, "Content-Type": "image/jpeg" },
+      body: frame,
+      cache: "no-store",
+      keepalive: false,
+    });
+    if (r.status === 403) {
+      setConn(false, "Schlüssel falsch – QR neu scannen");
+      await sleep(2000);
+      return;
+    }
+    if (!r.ok) throw new Error("Status " + r.status);
+    setConn(true);
+    const j = await r.json();
+    for (const c of j.cmds || []) handle(c); // nicht warten, damit das Livebild weiterläuft
+  }
+
   async function loop() {
+    let sending = null; // laufender Sendevorgang
+    let last = 0;
     for (;;) {
-      const t0 = performance.now();
       try {
-        if (video.videoWidth) {
-          // Hinweis, solange das Handy hochkant gehalten wird (das Foto soll quer sein)
-          $("rot").classList.toggle("hidden", video.videoWidth >= video.videoHeight);
-          const frame = await grab(640, 0.6);
-          const r = await fetch("/phone/frame", {
-            method: "POST",
-            headers: { "X-Key": key, "Content-Type": "image/jpeg" },
-            body: frame,
-            cache: "no-store",
-          });
-          if (r.status === 403) {
-            setConn(false, "Schlüssel falsch – QR neu scannen");
-            await sleep(2000);
-            continue;
-          }
-          if (!r.ok) throw new Error("Status " + r.status);
-          setConn(true);
-          const j = await r.json();
-          for (const c of j.cmds || []) await handle(c);
-        }
+        await nextVideoFrame();
+        if (!video.videoWidth) continue;
+        const now = performance.now();
+        if (now - last < 1000 / FPS - 2) continue;
+        // Hinweis, solange das Handy hochkant gehalten wird (das Foto soll quer sein)
+        $("rot").classList.toggle("hidden", video.videoWidth >= video.videoHeight);
+        const frame = await grab(LIVE_DIM, LIVE_Q); // kodieren, während das letzte Bild noch unterwegs ist
+        if (sending) await sending; // erst senden, wenn das vorige angekommen ist
+        last = performance.now();
+        sending = send(frame).catch(async () => {
+          setConn(false);
+          await sleep(1000);
+        }).finally(() => { sending = null; });
       } catch (e) {
         setConn(false);
         await sleep(1000);
       }
-      const dt = performance.now() - t0;
-      if (dt < 110) await sleep(110 - dt);
     }
   }
 

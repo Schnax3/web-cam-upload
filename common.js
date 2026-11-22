@@ -67,9 +67,9 @@
     return r.json();
   }
   const serverInfo = () => getJson("/info");   // { public_url, ttl, lan_url, tls }
-  const serverStatus = () => getJson("/status"); // { phone, seq, token, photos, tunnel }
+  const serverStatus = () => getJson("/status"); // { phone, seq, token, latest, tunnel }
 
-  // Befehl an das Handy ("shoot" = auslösen, "flip" = Kamera wechseln)
+  // Befehl an das Handy ("shoot" = auslösen)
   async function sendCmd(cmd) {
     const r = await fetch(server() + "/cmd", {
       method: "POST",
@@ -80,24 +80,8 @@
     if (!r.ok) throw new Error("Befehl fehlgeschlagen (" + r.status + ").");
   }
 
-  // Alle gespeicherten Fotos löschen, gibt die Anzahl zurück
-  async function clearPhotos() {
-    const r = await fetch(server() + "/clear", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-    if (!r.ok) throw new Error("Löschen fehlgeschlagen (" + r.status + ").");
-    return (await r.json()).deleted;
-  }
-
-  // Foto der Laptop-Kamera zum Server schicken. Gibt { token, publicUrl, ttl } zurück.
-  async function uploadBlob(blob) {
-    let info;
-    try {
-      info = await serverInfo();
-    } catch (e) {
-      throw new Error("Foto-Server nicht erreichbar. Läuft foto_server.py?");
-    }
-    if (!info.public_url) {
-      throw new Error("Der Server hat keine Abhol-Adresse (Cloudflare-Tunnel fehlt).");
-    }
+  // Foto der Laptop-Kamera auf dem Server speichern. Gibt den Token zurück.
+  async function saveBlob(blob) {
     let res;
     try {
       res = await fetch(server() + "/upload", {
@@ -106,11 +90,11 @@
         body: blob,
       });
     } catch (e) {
-      throw new Error("Upload zum Foto-Server fehlgeschlagen.");
+      throw new Error("Foto konnte nicht gespeichert werden. Läuft foto_server.py?");
     }
     const json = await res.json().catch(() => ({}));
-    if (!res.ok || !json.token) throw new Error("Upload fehlgeschlagen: " + (json.error || res.status));
-    return { token: json.token, publicUrl: info.public_url, ttl: json.expires_in };
+    if (!res.ok || !json.token) throw new Error("Speichern fehlgeschlagen: " + (json.error || res.status));
+    return json.token;
   }
 
   // Link im QR-Code: GitHub-Pages-Seite, Abhol-Adresse und Token stehen hinter dem #
@@ -139,5 +123,5 @@
       d + '" fill="#000"/></svg>';
   }
 
-  window.WCU = { server, startCamera, stopCamera, snapshot, countdown, flash, serverInfo, serverStatus, sendCmd, clearPhotos, uploadBlob, viewerLink, renderQR };
+  window.WCU = { server, startCamera, stopCamera, snapshot, countdown, flash, serverInfo, serverStatus, sendCmd, saveBlob, viewerLink, renderQR };
 })();

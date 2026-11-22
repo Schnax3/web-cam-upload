@@ -50,7 +50,7 @@ URL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
 MAX_PHOTO = 12 * 1024 * 1024
 MAX_FRAME = 3 * 1024 * 1024
 PHONE_TIMEOUT = 4  # Sekunden ohne Livebild = Handy getrennt
-ALLOWED_CMDS = {"shoot", "flip"}
+ALLOWED_CMDS = {"shoot"}
 # Diese Header setzen Tunnel/Proxys bei Anfragen von außen.
 FORWARD_HEADERS = ("X-Forwarded-For", "CF-Connecting-IP", "Cf-Ray", "Forwarded", "X-Real-Ip", "Cdn-Loop")
 STATIC_TYPES = {
@@ -78,7 +78,8 @@ class State:
     frame_id = 0
     cmds = []
     seq = 0
-    last_token = None
+    last_token = None    # letztes Foto vom Handy (zusammen mit seq)
+    latest_token = None  # zuletzt gespeichertes Foto, egal von welcher Kamera
     tunnel_proc = None
 
 
@@ -198,6 +199,7 @@ class Handler(BaseHTTPRequestHandler):
         token = secrets.token_urlsafe(16)
         State.photos.mkdir(exist_ok=True)
         (State.photos / f"{token}.jpg").write_bytes(data)
+        State.latest_token = token
         return token
 
     # ---------- Anfragen ----------
@@ -221,11 +223,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/status":
             if not self.local_only():
                 return self.reply_json(403, {"error": "nur lokal"})
-            count = len(list(State.photos.glob("*.jpg"))) if State.photos.is_dir() else 0
             with State.cond:
+                latest = State.latest_token
+                if latest and not (State.photos / f"{latest}.jpg").is_file():
+                    latest = None  # inzwischen abgelaufen
                 return self.reply_json(200, {
                     "phone": phone_connected(), "seq": State.seq, "token": State.last_token,
-                    "photos": count, "tunnel": State.public_url is not None,
+                    "latest": latest, "tunnel": State.public_url is not None,
                 })
 
         if path == "/stream":  # Livebild des Handys als Motion-JPEG
@@ -335,21 +339,6 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply_json(409, {"error": "kein Handy verbunden"})
                 State.cmds.append(cmd)
             return self.reply_json(200, {"ok": True})
-
-        if path == "/clear":  # alle Fotos löschen
-            if not self.local_only():
-                return self.reply_json(403, {"error": "nur lokal"})
-            n = 0
-            if State.photos.is_dir():
-                for f in State.photos.glob("*.jpg"):
-                    try:
-                        f.unlink()
-                        n += 1
-                    except OSError:
-                        pass
-            with State.cond:
-                State.last_token = None
-            return self.reply_json(200, {"deleted": n})
 
         return self.reply_json(404, {"error": "nicht gefunden"})
 

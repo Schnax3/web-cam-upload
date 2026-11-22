@@ -13,9 +13,14 @@ window.CONFIG = {
   // ist ein Ausschnitt aus der Mitte (bei 2560 px: 9:16 = ca. 810 x 1440 px, 3:4 = ca. 1080 x 1440 px).
   MAX_SIZE: 2560,
 
-  // Countdown vor dem Foto der Laptop-Kamera in Sekunden (0 = sofort auslösen)
+  // Countdown vor dem Foto in Sekunden (0 = sofort auslösen)
   COUNTDOWN: 3,
 
-  // Titel auf den Seiten
+  // Wie das Livebild in der linken Hälfte des Laptop-Bildschirms eingepasst wird:
+  // "cover"   = füllt die Hälfte, Ränder werden abgeschnitten (ähnelt dem Hochkant-Ausschnitt)
+  // "contain" = zeigt das ganze Bild genau wie im Foto, mit schwarzen Balken
+  VIEW_FIT: "cover",
+
+  // Titel (Browser-Tab)
   TITLE: "Foto-Aktion"
 };

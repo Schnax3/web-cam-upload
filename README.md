@@ -36,7 +36,9 @@ Foto-Aktion für den Aktionsstand: Foto aufnehmen → QR-Code erscheint → Besu
    löst auf Befehl aus                              └─► Vorschau, Filter, Download
 ```
 
-**Handy hat Vorrang:** Solange kein Handy verbunden ist, benutzt die Laptop-Seite die Laptop-Kamera und zeigt rechts den Kopplungs-QR. Sobald ein Handy gekoppelt ist (auch nachträglich), **verschwindet der QR** und die Laptop-Seite zeigt **nur noch das Livebild des Handys im Vollbild** (Stand-Ansicht). Die Laptop-Kamera pausiert. **Enter** löst am Handy aus. Schließt du die Handy-Seite, schaltet die Laptop-Seite nach ca. 4 Sekunden von selbst wieder auf die Laptop-Kamera und zeigt den QR wieder.
+**Laptop-Seite ohne Bedienelemente:** Der Bildschirm ist in zwei Hälften geteilt: auf der einen das **Livebild** (Handy oder Laptop-Kamera), auf der anderen der **QR-Code zum letzten Foto**. Es gibt keine Knöpfe, Menüs oder Einstellungen. Ausgelöst wird nur mit **Enter**.
+
+**Handy hat Vorrang:** Solange kein Handy verbunden ist, benutzt die Laptop-Seite die Laptop-Kamera und zeigt anfangs den Kopplungs-QR. Sobald ein Handy gekoppelt ist (auch nachträglich), **verschwindet der Kopplungs-QR** und das Livebild des Handys ersetzt die Laptop-Kamera. Schließt du die Handy-Seite, schaltet die Laptop-Seite nach ca. 4 Sekunden von selbst wieder auf die Laptop-Kamera.
 
 | Datei | Aufgabe |
 |---|---|
@@ -116,38 +118,29 @@ Der Browser öffnet sich von selbst auf der Laptop-Seite. Das Terminal-Fenster m
 
 ### Die Laptop-Seite
 
-Oben rechts zeigt die Seite den Zustand:
+Der Bildschirm hat zwei Hälften (im Hochformat untereinander):
 
-| Anzeige | Bedeutung |
+- **Eine Hälfte: Livebild** der aktiven Kamera (Handy oder Laptop). Der Countdown erscheint groß über dem Bild.
+- **Andere Hälfte: QR-Code zum letzten Foto** mit „Scannen & Foto holen“. Er bleibt stehen, bis das nächste Foto gemacht wird, und kommt auch nach Neuladen der Seite wieder. Davor steht dort „Gleich geht's los“. Solange noch kein Handy gekoppelt und noch kein Foto gemacht wurde, zeigt die Hälfte den Kopplungs-QR für das Handy.
+- Probleme (Server oder Tunnel nicht bereit) erscheinen als kleine Meldung unten, sonst ist nichts zu sehen. Der Mauszeiger verschwindet nach 2 Sekunden.
+
+Es gibt **keine Knöpfe**, keine Kamera-Umschaltung, keine Einstellungen und keine Löschfunktion. Nur drei Tasten:
+
+| Taste | Wirkung |
 |---|---|
-| **Server ✓ Tunnel ✓** (grün) | Alles bereit, Fotos können abgeholt werden. |
-| **Tunnel startet …** (rot) | Server läuft, der Tunnel ist noch nicht bereit (dauert beim Start einige Sekunden). |
-| **Server nicht erreichbar** (rot) | `foto_server.py` läuft nicht mehr. |
-| **Handy verbunden ✓** | Ein Handy ist gekoppelt, die Handy-Kamera hat Vorrang. |
+| **Enter** | Foto auslösen (Countdown, dann Foto mit der aktiven Kamera). Prellen und gehaltene Taste lösen nur einmal aus. |
+| **F** | Vollbild des Browsers ein/aus. |
+| **P** | Kopplungs-QR für das Handy ein-/ausblenden (z. B. um ein weiteres Handy zu koppeln). |
 
-Alles Wichtige wird hier bedient:
+Countdown (`COUNTDOWN`) und Bildausschnitt (`VIEW_FIT`) stellst du in `config.js` ein.
 
-- **Enter:** Foto auslösen (mit Countdown) mit der aktiven Kamera (Laptop oder Handy). Im Ergebnis (Foto + QR) schließt Enter die Anzeige und zeigt wieder das Livebild. Prellen und gehaltene Taste lösen nur einmal aus.
-- **F:** Vollbild des Browsers ein/aus.
-- **📸 Foto machen:** dasselbe wie Enter, per Mausklick.
-- **🔄 Handy-Kamera wechseln:** Hinten/vorne (nur sichtbar, wenn ein Handy verbunden ist).
-- **Countdown:** aus, 3, 5 oder 10 Sekunden (wird im Browser gemerkt).
-- **Foto + QR schließen:** „mit Enter“ oder automatisch nach 30 s / 60 s / 2 Min. (zeigt „Schließt automatisch in … s“). Praktisch, wenn am Stand niemand die Taste drückt.
-- **🗑️ Alle Fotos löschen:** löscht sofort alles auf dem Laptop (mit Rückfrage).
-- **Abhol-Adresse:** zeigt die aktuelle Tunnel-Adresse.
-- **QR-Code „Handy als externe Kamera“:** zum Koppeln des Handys, nur sichtbar, solange kein Handy verbunden ist.
-
-### Stand-Ansicht (sobald ein Handy verbunden ist)
-
-Der Bildschirm zeigt **nur das Livebild des Handys**, ohne Rahmen, Knöpfe oder QR-Code, und der Mauszeiger ist ausgeblendet. Der Countdown erscheint groß über dem Bild. Bewegst du die Maus, erscheint unten eine Leiste mit **Foto machen**, **Kamera wechseln**, **Vollbild** und **Einstellungen**. „Einstellungen“ zeigt die normale Ansicht (Countdown, Löschen, Abhol-Adresse), „🖥️ Nur Kamerabild zeigen“ bringt die Stand-Ansicht zurück. Verbindet sich das Handy neu, startet automatisch wieder die Stand-Ansicht.
-
-Tipp für den Stand: **F** drücken (Vollbild), Maus weg, ab jetzt nur noch **Enter**.
+Tipp für den Stand: **F** drücken, ab jetzt nur noch **Enter**.
 
 ### Foto aufnehmen und abholen
 
-1. **Enter** drücken, der Countdown läuft über dem Kamerabild.
-2. Das Foto erscheint groß mit einem **QR-Code**. Der Besucher scannt ihn mit der Handy-Kamera.
-3. **Enter** (oder die eingestellte Zeit) schließt die Anzeige, das Livebild ist wieder da. Nächste Person, wieder **Enter**.
+1. **Enter** drücken, der Countdown läuft über dem Livebild.
+2. Rechts erscheint der **QR-Code** des neuen Fotos. Der Besucher scannt ihn mit der Handy-Kamera.
+3. Der QR bleibt, das Livebild läuft weiter. Nächste Person, wieder **Enter**: der QR wird durch den des neuen Fotos ersetzt.
 
 ### Handy als externe Kamera hinzufügen (jederzeit)
 
@@ -155,8 +148,8 @@ Tipp für den Stand: **F** drücken (Vollbild), Maus weg, ab jetzt nur noch **En
 2. Den QR-Code im Kasten „Handy als externe Kamera“ mit dem Handy scannen.
 3. **Beim ersten Mal** zeigt das Handy eine Zertifikatswarnung („Verbindung nicht privat“ / „Nicht sicher“), weil der Laptop sein Zertifikat selbst ausstellt: Android/Chrome „Erweitert → Weiter zu … (unsicher)“, iPhone/Safari „Details einblenden → Diese Website besuchen“. Das ist nur für das eigene Handy nötig und wird später nicht mehr gefragt. Danach noch die Kamera erlauben.
 4. Das Handy zeigt das Kamerabild vollflächig und oben „Mit Laptop verbunden ✓“. Der Bildschirm bleibt an.
-5. Auf dem Laptop **verschwindet der Kopplungs-QR**, die Laptop-Kamera pausiert und es ist nur noch das Livebild des Handys im Vollbild zu sehen.
-6. Ab jetzt alles am Laptop: **Enter** = Foto, Kamera wechseln über die Bedienleiste. Das Foto kommt in hoher Auflösung (`MAX_SIZE`, Standard 2560 px) vom Handy und erscheint mit QR-Code am Laptop.
+5. Auf dem Laptop **verschwindet der Kopplungs-QR**, die Laptop-Kamera pausiert und das Livebild des Handys ist zu sehen.
+6. Ab jetzt alles am Laptop: **Enter** = Foto. Das Foto kommt in hoher Auflösung (`MAX_SIZE`, Standard 2560 px) vom Handy und erscheint mit QR-Code am Laptop.
 
 Zurück zur Laptop-Kamera: Handy-Seite schließen (oder Handy sperren). Nach ca. 4 Sekunden schaltet die Laptop-Seite um.
 
@@ -174,7 +167,7 @@ Nach dem Scannen öffnet sich `foto.html`:
 
 ### Beenden
 
-Im Terminal **Strg+C**. Der Tunnel wird mitbeendet. Die Fotos im Ordner `photos/` werden beim nächsten Start nach Ablauf der Zeit gelöscht, oder gleich über **🗑️ Alle Fotos löschen**.
+Im Terminal **Strg+C**. Der Tunnel wird mitbeendet. Die Fotos im Ordner `photos/` werden nach Ablauf der Zeit (`--ttl`) automatisch gelöscht. Sofort löschen: Server beenden und den Ordner `photos/` löschen.
 
 ---
 
@@ -187,7 +180,8 @@ Im Terminal **Strg+C**. Der Tunnel wird mitbeendet. Die Fotos im Ordner `photos/
 | `PAGES_URL` | `https://schnax3.github.io/web-cam-upload/` | Adresse der GitHub-Pages-Seite. Dorthin führt der QR-Code zum Abholen. Mit `/` am Ende. |
 | `LOCAL_SERVER` | leer | Adresse des Foto-Servers. Leer = derselbe Server, von dem die Seite kommt. Normalerweise nie ändern. |
 | `MAX_SIZE` | `2560` | Längste Kante des Fotos in Pixeln. Hoch lassen: Die Hochkant-Version ist ein Ausschnitt aus der Mitte und hat nur einen Teil der Breite. Größer = schärfer, aber größere Dateien (ca. 1 MB bei 2560). |
-| `COUNTDOWN` | `3` | Vorgabe für den Countdown (auf der Laptop-Seite umstellbar). |
+| `COUNTDOWN` | `3` | Countdown in Sekunden (`0` = sofort). |
+| `VIEW_FIT` | `cover` | `cover` = Livebild füllt die Hälfte (Ränder werden abgeschnitten), `contain` = ganzes Bild mit Rändern. |
 | `TITLE` | `Foto-Aktion` | Titel oben auf der Laptop-Seite. |
 
 Die Laptop- und Handy-Seite kommen direkt vom Server, Änderungen wirken nach Neuladen. `foto.html` auf GitHub Pages liest `config.js` nicht.
@@ -251,7 +245,7 @@ Kamera, Livebild, Steuerung und Speicherung laufen komplett im lokalen Netz.
 ### Hinweise für den Stand
 
 - Es werden Fotos von Personen gemacht. Ein gut sichtbares Schild hilft: „Foto wird bis zu 24 Stunden auf dem Laptop gespeichert und danach gelöscht; nur mit dem QR-Code abrufbar.“ Bei Minderjährigen vorher klären, ob das für eure Veranstaltung eine Einwilligung der Eltern braucht.
-- Nach der Aktion **🗑️ Alle Fotos löschen** oder `--ttl` kurz wählen.
+- Nach der Aktion den Ordner `photos/` löschen oder `--ttl` kurz wählen.
 - Das WLAN sollte nicht für Fremde offen sein. Am besten eigenes WLAN oder Handy-Hotspot für den Stand.
 - Der Laptop sollte während der Aktion nicht in den Ruhezustand gehen (Energieeinstellungen).
 
@@ -284,7 +278,7 @@ Kamera, Livebild, Steuerung und Speicherung laufen komplett im lokalen Netz.
 - Laptop im WLAN erreichbar? Bei geänderter WLAN-Adresse des Laptops den QR neu scannen. Handy-Bildschirm muss an sein und die Seite im Vordergrund.
 
 **Das Handy-Livebild ruckelt**
-- Es sind ca. 9 Bilder pro Sekunde bei 640 Pixeln. Näher an den Router, 5-GHz-WLAN nutzen. Das Foto selbst kommt unabhängig davon in voller Qualität.
+- Das Livebild läuft mit bis zu 30 Bildern pro Sekunde bei 800 Pixeln (`FPS`, `LIVE_DIM`, `LIVE_Q` oben im Skript von `handy.html`). Wirkt es trotzdem ruckelig, ist meist das WLAN der Engpass: näher an den Router, 5-GHz-WLAN nutzen, `FPS` oder `LIVE_DIM` verkleinern. Das Foto selbst kommt unabhängig davon in voller Qualität.
 
 **Enter tut nichts**
 - Das Browserfenster der Laptop-Seite muss im Vordergrund sein (einmal ins Fenster klicken). Läuft schon ein Countdown oder wird gerade ein Foto angezeigt, schließt Enter zuerst die Anzeige.
@@ -327,7 +321,7 @@ Kamera, Livebild, Steuerung und Speicherung laufen komplett im lokalen Netz.
 
 ### Handy → Laptop
 
-Das Handy schickt etwa 9-mal pro Sekunde ein verkleinertes Einzelbild (`POST /phone/frame`, 640 px). Die Antwort enthält die offenen Befehle des Laptops (`shoot`, `flip`). So braucht es keine dauerhafte Verbindung und keinen zusätzlichen Dienst. Der Server reicht die Einzelbilder als Motion-JPEG an den Laptop weiter (`GET /stream`). Bei `shoot` nimmt das Handy ein Foto in voller Auflösung (längste Kante `MAX_SIZE`) und sendet es per `POST /phone/photo`. Nach 4 Sekunden ohne Livebild gilt das Handy als getrennt.
+Das Handy schickt bis zu 30-mal pro Sekunde ein verkleinertes Einzelbild (`POST /phone/frame`, 800 px). Das nächste Bild wird schon kodiert, während das vorige gesendet wird; ist das Netz langsam, werden Bilder übersprungen statt aufgestaut. Die Antwort enthält die offenen Befehle des Laptops (`shoot`). So braucht es keine dauerhafte Verbindung und keinen zusätzlichen Dienst. Der Server reicht die Einzelbilder als Motion-JPEG an den Laptop weiter (`GET /stream`). Bei `shoot` nimmt das Handy ein Foto in voller Auflösung (längste Kante `MAX_SIZE`) und sendet es per `POST /phone/photo`. Nach 4 Sekunden ohne Livebild gilt das Handy als getrennt.
 
 ### Der Link im QR-Code zum Abholen
 
@@ -346,11 +340,10 @@ Die Filter rechnen jeden Pixel selbst (Sepia, Graustufen, Sättigung, Kontrast, 
 | Anfrage | Wer darf | Zweck |
 |---|---|---|
 | `GET /info` | Laptop | Abhol-Adresse, Aufbewahrungszeit, Handy-Link. |
-| `GET /status` | Laptop | Handy verbunden?, Zähler und Token des letzten Handy-Fotos, Anzahl Fotos, Tunnel bereit? Die Laptop-Seite fragt das jede Sekunde ab. |
+| `GET /status` | Laptop | Handy verbunden?, Zähler und Token des letzten Handy-Fotos, Token des letzten Fotos überhaupt (`latest`), Tunnel bereit? Die Laptop-Seite fragt das jede Sekunde ab. |
 | `GET /stream` | Laptop | Livebild des Handys (Motion-JPEG). |
-| `POST /cmd` | Laptop | Befehl `shoot` oder `flip` an das Handy. |
+| `POST /cmd` | Laptop | Befehl `shoot` an das Handy. |
 | `POST /upload` | Laptop | Foto der Laptop-Kamera speichern. |
-| `POST /clear` | Laptop | Alle Fotos löschen. |
 | `POST /phone/frame` | Handy + Schlüssel | Livebild-Einzelbild senden, Befehle abholen. |
 | `POST /phone/photo` | Handy + Schlüssel | Foto in voller Größe senden. |
 | `GET /img/<Token>` | jeder mit Token | Liefert das Foto. Nur diese Anfrage erreicht den Server über den Tunnel. |
@@ -365,19 +358,17 @@ Fotos liegen als `photos/<Token>.jpg`. Ein Hintergrund-Thread löscht jede Minut
 Am besten am Vortag mit dem echten Laptop, dem echten WLAN und einem fremden Handy:
 
 - [ ] GitHub Pages ist an, `https://schnax3.github.io/web-cam-upload/` öffnet sich
-- [ ] `start.bat` / `start.sh` startet ohne Fehler, Browser öffnet sich, **Server ✓ Tunnel ✓** ist grün
+- [ ] `start.bat` / `start.sh` startet ohne Fehler, Browser öffnet sich, keine Fehlermeldung unten auf der Laptop-Seite
 - [ ] Windows-Firewall: Python in privaten Netzwerken erlaubt
 - [ ] Foto mit der Laptop-Kamera, QR erscheint
 - [ ] QR mit einem fremden Handy **im Mobilfunk** (WLAN aus) scannen, Foto lädt
 - [ ] Filter wechseln, Herunterladen funktioniert, Datei ist in der Foto-App/Downloads
 - [ ] Eigenes Handy koppeln (Zertifikatswarnung bestätigen, Kamera erlauben): Livebild erscheint am Laptop, Laptop-Kamera pausiert
-- [ ] Handy quer halten: Auf dem Laptop **verschwindet der Kopplungs-QR**, nur noch das Livebild im Vollbild (mit **F**)
-- [ ] **Enter** löst am Handy aus (Countdown), Foto erscheint mit QR-Code, **Enter** schließt die Anzeige
+- [ ] Handy quer halten: Auf dem Laptop **verschwindet der Kopplungs-QR**, Livebild des Handys (Vollbild mit **F**)
+- [ ] **Enter** löst am Handy aus (Countdown), der QR des Fotos erscheint in der anderen Hälfte
 - [ ] Mit dem fremden Handy: Format **Quer**, **Hochkant 3:4** und **9:16** herunterladen, Ausschnitt stimmt (Mitte des Querbilds)
-- [ ] Maus bewegen: Bedienleiste erscheint, „Einstellungen“ und „Nur Kamerabild zeigen“ funktionieren
-- [ ] 🔄 wechselt zwischen Hinter- und Frontkamera
 - [ ] Handy-Seite schließen: nach ca. 4 s ist wieder die Laptop-Kamera aktiv und der Kopplungs-QR wieder da
-- [ ] 🗑️ Alle Fotos löschen funktioniert
+- [ ] Seite neu laden: QR des letzten Fotos ist wieder da
 - [ ] Server beenden und neu starten: neues Foto geht, alter QR sagt sauber „nicht erreichbar“
 - [ ] Laptop-Ruhezustand ist aus, Netzteil steckt
 
