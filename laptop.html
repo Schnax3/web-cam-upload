@@ -10,18 +10,19 @@
   body { cursor: default; }
   body.idle { cursor: none; }
 
-  /* Zwei Hälften: links Livebild, rechts QR-Code zum letzten Foto */
-  #app { display: grid; grid-template-columns: 1fr 1fr; width: 100vw; height: 100vh; }
+  /* Breiter Livebild-Bereich, schmale Seitenleiste */
+  #app { display: grid; grid-template-columns: minmax(0, 1fr) clamp(220px, 25vw, 360px); width: 100vw; height: 100vh; }
   #live { position: relative; background: #000; overflow: hidden; }
   #live video, #live img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
   #live video.mirror { transform: scaleX(-1); }
   .note { position: absolute; left: 1rem; right: 1rem; bottom: 1rem; text-align: center; }
 
-  #side { position: relative; background: var(--panel); display: flex; align-items: center; justify-content: center; padding: 2rem; text-align: center; }
-  .view { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.2rem; width: 100%; }
-  .view h2 { margin: 0; font-size: clamp(1.4rem, 3vw, 2.6rem); }
-  .view p { margin: 0; color: var(--muted); font-size: clamp(1rem, 1.6vw, 1.4rem); max-width: 28rem; }
-  .qr { width: min(38vw, 70vh); }
+  #side { position: relative; min-width: 0; background: var(--panel); display: flex; align-items: center; justify-content: center; padding: clamp(.75rem, 1.5vw, 1.5rem); text-align: center; overflow: hidden; }
+  .view { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: clamp(.5rem, 1.2vh, 1rem); width: 100%; min-width: 0; }
+  .view h2 { margin: 0; font-size: clamp(1.1rem, 1.8vw, 1.6rem); }
+  .view p { margin: 0; color: var(--muted); font-size: clamp(.85rem, 1.1vw, 1rem); max-width: 28rem; }
+  .qr { width: min(100%, 38vh, 20rem); max-width: 100%; }
+  #photoPreview { display: block; width: min(100%, 18rem); max-height: 20vh; object-fit: contain; border: 2px solid rgba(255, 255, 255, .85); border-radius: 10px; background: #000; }
   .big { font-size: clamp(4rem, 10vw, 9rem); line-height: 1; }
   .spinner { width: 4rem; height: 4rem; border: 6px solid #2b3550; border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -29,8 +30,9 @@
   .sysnote { position: absolute; left: 1rem; right: 1rem; bottom: .8rem; margin: 0; font-size: .85rem; color: var(--muted); }
 
   @media (max-aspect-ratio: 1/1) {
-    #app { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
-    .qr { width: min(60vw, 38vh); }
+    #app { grid-template-columns: 1fr; grid-template-rows: minmax(0, 3fr) minmax(220px, 2fr); }
+    .qr { width: min(70vw, 32vh, 20rem); }
+    #photoPreview { width: min(70vw, 18rem); max-height: 12vh; }
   }
 </style>
 </head>
@@ -69,6 +71,7 @@
     <div id="vQr" class="view hidden">
       <div id="resultQr" class="qr"></div>
       <h2>📱 Scannen &amp; Foto holen</h2>
+      <img id="photoPreview" class="hidden" alt="Letztes Foto">
     </div>
     <!-- Fehler -->
     <div id="vErr" class="view hidden">
@@ -99,6 +102,13 @@
   let photo = { state: "none" };          // none | uploading | ready | error
   let photoGen = 0;
 
+  function setPhotoPreview(token) {
+    if (!token) return;
+    const preview = $("photoPreview");
+    preview.src = WCU.server() + "/img/" + encodeURIComponent(token) + "?v=" + Date.now();
+    preview.classList.remove("hidden");
+  }
+
   // ---------- rechte Hälfte ----------
   function renderSide() {
     let show;
@@ -126,6 +136,8 @@
     let token;
     try {
       token = await getToken();
+      if (gen !== photoGen) return;
+      setPhotoPreview(token);
     } catch (e) {
       if (gen === photoGen) setPhoto({ state: "error", msg: e.message });
       return;
@@ -259,7 +271,7 @@
       if (seqSeen === null) {
         seqSeen = s.seq;
         // Seite neu geladen: QR zum letzten Foto gleich wieder zeigen
-        if (s.latest) showPhoto(() => Promise.resolve(s.latest));
+        if (s.latest || s.token) showPhoto(() => Promise.resolve(s.latest || s.token));
       } else if (s.seq !== seqSeen) {
         seqSeen = s.seq;
         waiting = 0;
